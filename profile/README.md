@@ -32,14 +32,20 @@ information lives, alongside our sub-processors and privacy commitments. Where s
 
 ## Open source
 
-We run on open source and contribute back. Recent work:
+We run on open source and contribute back.
 
-- **[Calnode](https://github.com/Calnode/calnode)** — a self-hostable scheduling server. We are
-  contributing PostgreSQL support, plus fixes for event-type duplication and booking-page
-  clarity.
+- **[District Scheduler](https://github.com/distronode-corporation/district-scheduler)** is our
+  Apache-2.0 fork of [Calnode](https://github.com/Calnode/calnode), and the booking, meetings
+  and notetaker engine behind District AI. It adds a PostgreSQL-backed multi-tenant mode that
+  uses row-level security for isolation, and a PostgreSQL-only container image. Public, with
+  the architecture and audit documents that go with it.
+- **[Calnode](https://github.com/Calnode/calnode)** is the upstream scheduling server. We send
+  our changes back: fixes for event-type duplication, booking-page clarity, calendar
+  reconnection and locale handling are merged upstream and ship to every Calnode deployment,
+  not only ours. PostgreSQL and multi-tenancy were declined upstream on architectural grounds,
+  so the fork carries them.
 
-Our own forks live on [@distronode-com](https://github.com/distronode-com). Contributions are
-authored with AI assistance under human review, and our commits say so.
+Contributions are authored with AI assistance under human review, and our commits say so.
 
 ## Contact
 
