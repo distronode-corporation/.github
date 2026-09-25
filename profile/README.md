@@ -61,4 +61,4 @@ Contributions are authored with AI assistance under human review, and our commit
 RBC WaterPark Place, 20 Bay Street, 11th Floor
 Toronto, Ontario, M5J 2N8, Canada
 
-[distronode.com](https://www.distronode.com) · [distronode@distronode.com](mailto:distronode@distronode.com)
+[distronode.com](https://www.distronode.com) · [opensource@distronode.com](mailto:opensource@distronode.com)
