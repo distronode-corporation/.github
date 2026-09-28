@@ -38,6 +38,12 @@ District AI runs on open-source software, and we publish our own work the same w
 Apache-2.0. The apps are open source; the District AI service they talk to is not. All five
 projects, and everything we run on, are on [one page](https://www.distronode.com/open-source).
 
+**Without an account with us.** Today the apps need a District AI account to sign in. We want
+them to work without an account with us too. We have not worked out what that looks like or
+whether it can work, and the answer depends on what people would use them with, so we are
+asking before we build anything:
+[tell us what you would connect them to](https://github.com/distronode-corporation/.github/discussions/1).
+
 - **[District AI for iOS](https://github.com/distronode-corporation/district-ios)** is the
   native iPhone and iPad app, on the App Store.
 - **[District AI for Android](https://github.com/distronode-corporation/district-android)** is
