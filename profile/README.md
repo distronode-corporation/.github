@@ -24,7 +24,7 @@ Our own phone infrastructure, run like a phone company.
 | **Voice** | LiveKit for live calls, on our own servers in every region |
 | **Telephony** | Direct carrier connections, with local numbers in the United States, Canada and Europe |
 | **Regions** | Four independent deployments (United States, Canada, Europe, Asia-Pacific), each with its own database |
-| **Apps** | Web, plus native iOS, Android and Linux, with a native Mac app in development |
+| **Apps** | Web, plus native iOS, Android, Mac, Windows and Linux |
 
 **Where your data lives is a property of the deployment, not a promise in a brochure.** We
 publish a map of where each kind of data is kept, alongside the companies that help us run
@@ -35,7 +35,7 @@ say so on the page rather than rounding up. The technical detail is in the
 ## Open source
 
 District AI runs on open-source software, and we publish our own work the same way, under
-Apache-2.0. The apps are open source; the District AI service they talk to is not. All seven
+Apache-2.0. The apps are open source; the District AI service they talk to is not. All nine
 projects, and everything we run on, are on [one page](https://www.distronode.com/open-source).
 
 **Without an account with us.** Today the apps need a District AI account to sign in. We want
@@ -44,17 +44,35 @@ whether it can work, and the answer depends on what people would use them with, 
 asking before we build anything:
 [tell us what you would connect them to](https://github.com/distronode-corporation/.github/discussions/1).
 
+**Phones and tablets**
+
 - **[District AI for iOS](https://github.com/distronode-corporation/district-ios)** is the
   native iPhone and iPad app, on the App Store.
-- **[District AI for Mac](https://github.com/distronode-corporation/district-macos)** is the
-  native SwiftUI Mac app. It is in development and not released yet.
 - **[District AI for Android](https://github.com/distronode-corporation/district-android)** is
   the native Android app, which calls through Android's own Telecom framework, on Google Play.
+
+**Desktop**
+
+- **[District AI for Mac](https://github.com/distronode-corporation/district-macos)** is the
+  native SwiftUI Mac app, released as a notarized .dmg on GitHub Releases and through Homebrew:
+  `brew install distronode-corporation/tap/district-ai`.
+- **[District AI for Windows](https://github.com/distronode-corporation/district-windows)** is
+  the native WinUI 3 app in C#, over the shared Rust core. Test builds are on GitHub Releases;
+  the Microsoft Store listing is not live yet.
 - **[District AI for Linux](https://github.com/distronode-corporation/district-linux)** is the
-  native desktop app in Rust with GTK 4 and libadwaita, released as a .deb and a Flatpak.
+  native desktop app in Rust with GTK 4 and libadwaita, released on GitHub Releases as a .deb
+  and a Flatpak bundle.
+
+**Shared cores**
+
 - **[District Core for Swift](https://github.com/distronode-corporation/district-core-swift)**
   is the Swift package the iPhone, iPad and Mac apps share: their models, sign-in, networking,
   data and call logic, tested on Linux as well as macOS.
+- **[District Core for Rust](https://github.com/distronode-corporation/district-core-rust)**
+  is the Rust core the Linux and Windows apps share.
+
+**Tools**
+
 - **[bridgewatch](https://github.com/distronode-corporation/bridgewatch)** is our tray monitor
   for GitLab CI and GitHub Actions, for macOS and Linux. It shows one row per push with every
   downstream pipeline under it, tells a scheduled pipeline from a push, and reports whether
@@ -69,8 +87,8 @@ asking before we build anything:
   deployment, not only ours. PostgreSQL and multi-tenancy were declined upstream on
   architectural grounds, so the fork carries them.
 
-Each project except District Scheduler, District AI for Mac and District Core for Swift has a
-read-only mirror on [GitLab](https://gitlab.com/distronode-corporation); issues and pull
+Each project except District AI for Windows, District Core for Rust and District Scheduler has
+a read-only mirror on [GitLab](https://gitlab.com/distronode-corporation); issues and pull
 requests live here on GitHub.
 
 Contributions are authored with AI assistance under human review, and our commits say so.
