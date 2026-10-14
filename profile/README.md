@@ -80,8 +80,8 @@ asking before we build anything:
   the thing you care about actually deployed ([mirror](https://gitlab.com/distronode-corporation/bridgewatch)).
 - **[District Scheduler](https://github.com/distronode-corporation/district-scheduler)** is our
   fork of [Calnode](https://github.com/Calnode/calnode), and the scheduling engine behind the
-  booking page every District AI plan includes. It adds a multi-tenant mode on PostgreSQL, with row-level security
-  as the isolation, and District AI's branding. Switched off, each instance serves one
+  booking page every District AI plan includes. It adds a multi-tenant mode on PostgreSQL,
+  with row-level security as the isolation, and District AI's branding. Switched off, each instance serves one
   workspace, as upstream Calnode does.
 - **Fixes go upstream.** Our fixes for event-type duplication, booking-page clarity, calendar
   reconnection and locale handling are merged into Calnode and ship to every Calnode
