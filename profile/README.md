@@ -32,6 +32,16 @@ the service and our privacy commitments. Where something is *not* kept in your r
 say so on the page rather than rounding up. The technical detail is in the
 [Sovereign portal](https://www.distronode.com/sovereign).
 
+## Get the apps
+
+- **iPhone and iPad:** [App Store](https://apps.apple.com/app/id6809297970)
+- **Android:** [Google Play](https://play.google.com/store/apps/details?id=com.distronode.districtai)
+- **Windows:** [Microsoft Store](https://apps.microsoft.com/detail/9P9F0NNFJ3CP)
+- **Mac:** a signed, notarised download on [GitHub Releases](https://github.com/distronode-corporation/district-macos/releases/latest),
+  or `brew install distronode-corporation/tap/district-ai` from our
+  [Homebrew tap](https://github.com/distronode-corporation/homebrew-tap)
+- **Linux:** a .deb and a Flatpak on [GitHub Releases](https://github.com/distronode-corporation/district-linux/releases/latest)
+
 ## Open source
 
 District AI runs on open-source software, and we publish our own work the same way, under
@@ -69,9 +79,9 @@ asking before we build anything:
   downstream pipeline under it, tells a scheduled pipeline from a push, and reports whether
   the thing you care about actually deployed ([mirror](https://gitlab.com/distronode-corporation/bridgewatch)).
 - **[District Scheduler](https://github.com/distronode-corporation/district-scheduler)** is our
-  fork of [Calnode](https://github.com/Calnode/calnode), and the scheduling engine behind
-  District AI's bookings. It adds a multi-tenant mode on PostgreSQL, with row-level security
-  as the isolation, and District AI's branding. Switched off, each instance serves one
+  fork of [Calnode](https://github.com/Calnode/calnode), and the scheduling engine behind the
+  booking page every District AI plan includes. It adds a multi-tenant mode on PostgreSQL,
+  with row-level security as the isolation, and District AI's branding. Switched off, each instance serves one
   workspace, as upstream Calnode does.
 - **Fixes go upstream.** Our fixes for event-type duplication, booking-page clarity, calendar
   reconnection and locale handling are merged into Calnode and ship to every Calnode
