@@ -1,0 +1,20 @@
+version: 2
+
+# Every `uses:` in the workflows is pinned to a commit with a `# vX.Y.Z` comment,
+# which is right for supply-chain safety and wrong for noticing a security fix,
+# because a pinned SHA never moves on its own. This turns each pin into a pull
+# request; Dependabot rewrites both the SHA and the version comment.
+#
+# `cooldown` holds a version update back until the release is a week old, so a
+# compromised publish that is yanked within days never reaches a pull request here.
+# It does not delay security updates.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions-minor:
+        update-types: [minor, patch]
