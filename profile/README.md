@@ -1,3 +1,9 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="/profile/assets/distronode-logo-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="/profile/assets/distronode-logo-light.png">
+  <img alt="Distronode" src="/profile/assets/distronode-logo-light.png" width="220">
+</picture>
+
 # Distronode Corporation
 
 **A Canadian telecommunications company. We provide business phone numbers, calls and texts in Canada, the United States and Europe, and we build [District AI](https://www.distronode.com), the 24/7 receptionist that answers them.**
@@ -37,7 +43,7 @@ say so on the page rather than rounding up. The technical detail is in the
 - **iPhone and iPad:** [App Store](https://apps.apple.com/app/id6809297970)
 - **Android:** [Google Play](https://play.google.com/store/apps/details?id=com.distronode.districtai)
 - **Windows:** [Microsoft Store](https://apps.microsoft.com/detail/9P9F0NNFJ3CP)
-- **Mac:** a signed, notarised download on [GitHub Releases](https://github.com/distronode-corporation/district-macos/releases/latest),
+- **Mac:** the [Mac App Store](https://apps.apple.com/app/id6809297970?platform=mac), a signed, notarised download on [GitHub Releases](https://github.com/distronode-corporation/district-macos/releases/latest),
   or `brew install distronode-corporation/tap/district-ai` from our
   [Homebrew tap](https://github.com/distronode-corporation/homebrew-tap)
 - **Linux:** a .deb and a Flatpak on [GitHub Releases](https://github.com/distronode-corporation/district-linux/releases/latest)
@@ -45,7 +51,7 @@ say so on the page rather than rounding up. The technical detail is in the
 ## Open source
 
 District AI runs on open-source software, and we publish our own work the same way, under
-Apache-2.0. The apps are open source; the District AI service they talk to is not. All nine
+Apache-2.0. The apps are open source; the District AI service they talk to is not. All ten
 projects, and everything we run on, are on [one page](https://www.distronode.com/open-source).
 
 **Without an account with us.** Today the apps need a District AI account to sign in. We want
@@ -57,7 +63,7 @@ asking before we build anything:
 - **[District AI for iOS](https://github.com/distronode-corporation/district-ios)** is the
   native iPhone and iPad app, on the App Store ([mirror](https://gitlab.com/distronode-corporation/district-ios)).
 - **[District AI for Mac](https://github.com/distronode-corporation/district-macos)** is the
-  native SwiftUI Mac app, released as a signed, notarised download and through Homebrew
+  native SwiftUI Mac app, on the Mac App Store and released as a signed, notarised download and through Homebrew
   ([mirror](https://gitlab.com/distronode-corporation/district-macos)).
 - **[District AI for Android](https://github.com/distronode-corporation/district-android)** is
   the native Android app, which calls through Android's own Telecom framework, on Google Play
@@ -78,6 +84,9 @@ asking before we build anything:
   for GitLab CI and GitHub Actions, for macOS and Linux. It shows one row per push with every
   downstream pipeline under it, tells a scheduled pipeline from a push, and reports whether
   the thing you care about actually deployed ([mirror](https://gitlab.com/distronode-corporation/bridgewatch)).
+- **[worldinmotion](https://github.com/distronode-corporation/worldinmotion)** lets AI agent
+  sessions message each other across machines and accounts, end-to-end encrypted, through a
+  relay that cannot read the messages. It is a pre-release.
 - **[District Scheduler](https://github.com/distronode-corporation/district-scheduler)** is our
   fork of [Calnode](https://github.com/Calnode/calnode), and the scheduling engine behind the
   booking page every District AI plan includes. It adds a multi-tenant mode on PostgreSQL,
@@ -88,7 +97,7 @@ asking before we build anything:
   deployment, not only ours. PostgreSQL and multi-tenancy were declined upstream on
   architectural grounds, so the fork carries them.
 
-Each project except District Scheduler has a read-only mirror on
+Each project except District Scheduler and worldinmotion has a read-only mirror on
 [GitLab](https://gitlab.com/distronode-corporation); issues and pull requests live here on
 GitHub.
 
