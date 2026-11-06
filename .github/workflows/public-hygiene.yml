@@ -1,29 +1,47 @@
 name: Public hygiene
 
-# The organization's public hygiene check for issue and pull request text: titles,
-# descriptions, conversation comments, reviews and review comments. Every public
-# repository calls it from a small `.github/workflows/public-hygiene.yml` of its own,
-# pinned to a commit of this repository:
+# The organization's public hygiene check for issue, pull request, discussion and release
+# text: titles, descriptions, comments, reviews, review comments, discussion replies,
+# release notes and a pull request's commit messages. Every public repository calls it
+# from a small `.github/workflows/public-hygiene.yml` of its own, pinned to a commit of
+# this repository's main:
 #
 #   uses: distronode-corporation/.github/.github/workflows/public-hygiene.yml@<sha>
 #
-# The rules and the code are in `.github/public-hygiene/` (rules.py, event.py and their
-# tests). Each run reads the whole thread, fails when anything in it matches a rule, and
-# keeps ONE comment on the thread up to date naming the rule ids and what they cover. The
-# matched text is never repeated: not in the comment, the log or the step summary.
+# The rules and the code are in `.github/public-hygiene/`. Each run reads the whole
+# thread, fails when anything in it matches a rule, and keeps ONE comment on the thread
+# naming the rule ids and what they cover. The matched text is never repeated: not in the
+# comment, the log or the step summary.
+#
+# Jobs:
+# - `text`: the check. Exit 1 on a finding; exit 2 when the thread could not be read in
+#   full (an API error, too many pages, the time budget). Every event type writes a check
+#   run with this same name, and the latest one is the one that counts. That is sound
+#   because every run reads the whole thread and fails closed: a later run can only be
+#   green if the whole thread was read and was clean.
+# - `pin`: fails unless the caller's pin is a commit on this repository's main, so a
+#   pin to an unmerged or impostor commit stays red.
 #
 # Safe on untrusted text by construction:
 # - Nothing from the caller's repository is checked out or run. The only checkout is
 #   this repository, at the exact commit the caller pinned (`job.workflow_sha`).
 # - No event text is expanded into a `run:` line or an `env:` value (step env is
 #   printed in the log). event.py reads the event from GITHUB_EVENT_PATH and the thread
-#   from the REST API.
-# - No third-party action. The token is the caller's GITHUB_TOKEN, used for reading the
-#   thread and writing the one comment.
+#   from the API.
+# - No third-party action. The token is the caller's GITHUB_TOKEN. The one secret, the
+#   denylist key, is in the env of the one step that scans, which runs only this
+#   repository's pinned code; no step prints it.
 on:
-  workflow_call: {}
+  workflow_call:
+    secrets:
+      # The `internal-name` rule's HMAC key (see rules.py). Optional: a run without it
+      # (a fork's pull request, Dependabot) skips that one rule and says so in the
+      # summary; every other rule still runs. Callers map it explicitly, never with
+      # `secrets: inherit`, so no other secret reaches this workflow.
+      PUBLIC_HYGIENE_DENYLIST_KEY:
+        required: false
 
-# Nothing at the top level; the job asks for exactly what it needs, and a called
+# Nothing at the top level; each job asks for exactly what it needs, and a called
 # workflow can never get more than its caller grants.
 permissions: {}
 
@@ -33,9 +51,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: read # check out this repository's checker
-      issues: write # read the thread, and keep the one comment on an issue
-      pull-requests: write # read reviews, and keep the one comment on a pull request
+      contents: read # check out this repository's checker; read commits and releases
+      issues: write # read the thread, and keep the one comment on an issue or pull request
+      pull-requests: read # read reviews, review comments and commits
+      discussions: write # read a discussion, and keep the one comment on it
     steps:
       - name: Check out the checker (this repository, at the pinned commit)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,9 +67,34 @@ jobs:
       # A rule that has stopped matching its planted examples fails here, loudly,
       # instead of passing every thread quietly.
       - name: Self-test the rules
-        run: python3 -I -m unittest discover -s .github/public-hygiene -t .github/public-hygiene
+        env:
+          PUBLIC_HYGIENE_SKIP_SLOW: "1" # the timing test runs in this repository's own CI
+        run: python3 -I -B -m unittest discover -s .github/public-hygiene -t .github/public-hygiene
 
       - name: Check the thread
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 -I .github/public-hygiene/event.py
+          PUBLIC_HYGIENE_DENYLIST_KEY: ${{ secrets.PUBLIC_HYGIENE_DENYLIST_KEY }}
+        run: python3 -I -B .github/public-hygiene/event.py
+
+  pin:
+    name: pin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # check out this repository's checker; compare the pin with main
+    steps:
+      - name: Check out the checker (this repository, at the pinned commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/public-hygiene
+
+      - name: The pin is a commit on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: python3 -I -B .github/public-hygiene/pin.py

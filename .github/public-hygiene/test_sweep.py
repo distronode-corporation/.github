@@ -12,6 +12,7 @@ import json
 import sys
 import unittest
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -25,7 +26,7 @@ NOW = dt.datetime(2026, 11, 9, 7, 0, tzinfo=dt.timezone.utc)
 RECENT = "2026-11-08T10:00:00Z"
 OLD = "2026-10-01T10:00:00Z"
 BAD_IP = "34.120.7.9"
-BAD_REF = "GitLab #2, note 4021983495"
+BAD_REF = "GitLab #7, note 1234509876"
 HTML = "https://github.com/octo/app"
 
 
@@ -38,7 +39,7 @@ class FakeGitHub:
         self.paths: list[str] = []
         self.data: dict[str, list[Any]] = {
             "/orgs/octo/repos?type=public": [
-                {"full_name": "octo/app"},
+                {"full_name": "octo/app", "has_discussions": True},
                 {"full_name": "octo/old", "archived": True},
             ],
             "/repos/octo/app/issues?state=all&since=2026-11-01T07:00:00Z": [
@@ -62,12 +63,28 @@ class FakeGitHub:
             ],
         }
 
-    def get(self, path: str) -> Any:
-        raise AssertionError(path)
+        self.commit_date = RECENT
+        self.discussions = [
+            {"title": "Idea", "body": "clean", "url": f"{HTML}/discussions/4", "updatedAt": RECENT, "authorAssociation": "MEMBER", "author": {"login": "pat", "__typename": "User"},
+             "comments": {"nodes": [{"body": "ok", "url": f"{HTML}/discussions/4#discussioncomment-1", "isMinimized": False, "authorAssociation": "MEMBER", "author": {"login": "pat", "__typename": "User"},
+                                     "replies": {"nodes": [{"body": f"from {BAD_IP}", "url": f"{HTML}/discussions/4#discussioncomment-2", "isMinimized": False, "authorAssociation": "MEMBER", "author": {"login": "pat", "__typename": "User"}}]}}]}},
+            {"title": "Old", "body": f"from {BAD_IP}", "url": f"{HTML}/discussions/3", "updatedAt": OLD, "authorAssociation": "MEMBER", "author": {"login": "pat", "__typename": "User"}, "comments": {"nodes": []}},
+        ]
+        # Issue 9 is clean now, but an earlier revision of it is not.
+        self.edits = {9: {"body": "clean", "userContentEdits": {"totalCount": 2, "nodes": [{"diff": "clean"}, {"diff": f"from {BAD_IP}"}]}}}
 
-    def get_all(self, path: str) -> list[Any]:
+    def get(self, path: str) -> Any:
+        assert path == "/repos/octo/.github/commits?per_page=1", path
+        return [{"commit": {"committer": {"date": self.commit_date}}}]
+
+    def get_all(self, path: str, max_pages: int = event.MAX_PAGES) -> list[Any]:
         self.paths.append(path)
         return self.data[path]
+
+    def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        if "issueOrPullRequest" in query:
+            return {"repository": {"issueOrPullRequest": self.edits.get(variables["number"], {})}}
+        return {"repository": {"discussions": {"nodes": self.discussions}}}
 
     def post(self, path: str, body: dict[str, Any]) -> Any:
         raise AssertionError("the sweep never writes to GitHub")
@@ -94,7 +111,7 @@ class FakeGitLab:
     patch = post
 
 
-ENV = {"GITHUB_REPOSITORY_OWNER": "octo", "GITLAB_TOKEN": "t", "GITLAB_PROJECT": "123", "GITLAB_ISSUE": "4"}
+ENV = {"GITHUB_REPOSITORY_OWNER": "octo", "GITHUB_REPOSITORY": "octo/.github", "GITLAB_TOKEN": "t", "GITLAB_PROJECT": "123", "GITLAB_ISSUE": "4"}
 
 
 def run(env: dict[str, str], gh: Any, gl: Any) -> tuple[int, str]:
@@ -114,18 +131,45 @@ class Sweep(unittest.TestCase):
         self.assertEqual(path, "/projects/123/issues/4/notes")
         body = note["body"]
         self.assertIn(f"{HTML}/pull/7", body)  # the description
-        self.assertIn("pullrequestreview-1", body)  # the recent review
-        self.assertNotIn("pullrequestreview-2", body)  # the old one
+        self.assertIn("pullrequestreview-1", body)
+        self.assertIn("pullrequestreview-2", body)  # reviews are read in full: an edit keeps the old timestamp
         self.assertIn("releases/tag/v1", body)  # published by the bot, still checked
-        self.assertNotIn("releases/tag/v0", body)
+        self.assertIn("releases/tag/v0", body)  # releases are read in full too
+        self.assertIn(f"1 earlier revision(s) of a issue: {HTML}/issues/9", body)
+        self.assertIn("discussioncomment-2", body)  # a reply in a recent discussion
+        self.assertNotIn("discussions/3", body)  # an old discussion
         self.assertNotIn("/pull/8", body)  # Dependabot
         self.assertNotIn("issuecomment-2", body)  # the check's own comment
         self.assertNotIn("octo/old", " ".join(gh.paths))
-        for secret in (BAD_IP, BAD_REF, "4021983495"):
+        for secret in (BAD_IP, BAD_REF, "1234509876"):
             self.assertNotIn(secret, body)
             self.assertNotIn(secret, log)
         self.assertNotIn("github.com", log)  # the public log has counts only
-        self.assertIn("3 with findings in 1 repositories", log)
+        self.assertIn("7 with findings in 1 repositories", log)
+        self.assertNotIn("turns its schedule off", body)
+        self.assertIn("internal-name rule did not run", body)  # no key in the tests
+
+    def test_a_quiet_repository_is_warned_about(self) -> None:
+        gh, gl = FakeGitHub(), FakeGitLab()
+        gh.commit_date = "2026-09-01T00:00:00Z"
+        status, log = run(ENV, gh, gl)
+        self.assertEqual(status, 0)
+        self.assertIn("turns its schedule off at 60", gl.notes[0][1]["body"])
+        self.assertIn("No commit for 69 days", log)
+
+    def test_bad_sweep_days(self) -> None:
+        for value in ("x", "0", "999", "-3"):
+            status, log = run(dict(ENV, SWEEP_DAYS=value), FakeGitHub(), FakeGitLab())
+            self.assertEqual(status, 2, value)
+            self.assertIn("SWEEP_DAYS", log)
+
+    def test_main_hides_unexpected_errors(self) -> None:
+        with mock.patch.object(sweep, "run", side_effect=KeyError("secret " + BAD_IP)):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(sweep.main(), 2)
+        self.assertIn("KeyError", out.getvalue())
+        self.assertNotIn(BAD_IP, out.getvalue())
 
     def test_refuses_an_issue_that_is_not_confidential(self) -> None:
         for value in (False, None, "true"):
@@ -150,7 +194,7 @@ class Sweep(unittest.TestCase):
         gh.data["/orgs/octo/repos?type=public"].insert(0, {"full_name": "octo/noissues"})
         original = gh.get_all
 
-        def get_all(path: str) -> list[Any]:
+        def get_all(path: str, max_pages: int = event.MAX_PAGES) -> list[Any]:
             if path.startswith(("/repos/octo/noissues/issues?", "/repos/octo/noissues/pulls?")):
                 raise event.ApiError("GET /repos/octo/noissues/x: HTTP 503")
             if path.startswith("/repos/octo/noissues/"):
@@ -184,7 +228,7 @@ class Sweep(unittest.TestCase):
             {"number": 2, "title": "Old", "body": f"from {BAD_IP}", "updated_at": OLD, "user": user(), "html_url": "https://github.com/octo/prs/pull/2"},
         ]
 
-        def get_all(path: str) -> list[Any]:
+        def get_all(path: str, max_pages: int = event.MAX_PAGES) -> list[Any]:
             if path.startswith("/repos/octo/prs/issues?"):
                 raise event.ApiError("GET /repos/octo/prs/issues: HTTP 410", self.issues_status)
             if path == "/repos/octo/prs/pulls?state=all&sort=updated&direction=desc":
@@ -212,6 +256,8 @@ class Sweep(unittest.TestCase):
             for item in items:
                 if "body" in item:
                     item["body"] = "clean"
+        gh.discussions = []
+        gh.edits = {}
         gl = FakeGitLab()
         status, log = run(ENV, gh, gl)
         self.assertEqual(status, 0)
@@ -254,7 +300,7 @@ class RestApiTests(unittest.TestCase):
             seen.append(req)
             return pages[len(seen) - 1]
 
-        with mock.patch("urllib.request.urlopen", fake_urlopen):
+        with mock.patch.object(event.OPENER, "open", fake_urlopen):
             self.assertEqual(api.get_all("/x"), [1, 2, 3])
         self.assertEqual(len(seen), 2)
         self.assertEqual(seen[0].get_header("Authorization"), "Bearer tok")
@@ -263,18 +309,18 @@ class RestApiTests(unittest.TestCase):
     def test_too_many_pages(self) -> None:
         api = event.RestApi("https://api.example.org", "tok")
         loop = lambda req, timeout: FakeResponse([1], '<https://api.example.org/x?p=n>; rel="next"')  # noqa: E731
-        with mock.patch("urllib.request.urlopen", loop), self.assertRaises(event.ApiError):
+        with mock.patch.object(event.OPENER, "open", loop), self.assertRaises(event.ApiError):
             api.get_all("/x?a=1")
 
     def test_errors_carry_status_not_body(self) -> None:
         api = event.RestApi("https://api.example.org", "tok")
         err = urllib.error.HTTPError("https://api.example.org/x", 403, "Forbidden " + BAD_IP, {}, io.BytesIO(BAD_IP.encode()))  # type: ignore[arg-type]
-        with mock.patch("urllib.request.urlopen", side_effect=err):
+        with mock.patch.object(event.OPENER, "open", side_effect=err):
             with self.assertRaises(event.ApiError) as ctx:
                 api.post("/x", {"body": BAD_IP})
         self.assertEqual(str(ctx.exception), "POST /x: HTTP 403")
         self.assertEqual(ctx.exception.status, 403)
-        with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("down")):
+        with mock.patch.object(event.OPENER, "open", side_effect=urllib.error.URLError("down")):
             with self.assertRaises(event.ApiError) as ctx:
                 api.get("/y?q=1")
         self.assertEqual(str(ctx.exception), "GET /y: URLError")
@@ -282,16 +328,56 @@ class RestApiTests(unittest.TestCase):
     def test_low_level_failures_become_api_errors(self) -> None:
         api = event.RestApi("https://api.example.org", "tok")
         for exc in (ConnectionResetError(), TimeoutError(), http.client.IncompleteRead(b"x")):
-            with mock.patch("urllib.request.urlopen", side_effect=exc):
+            with mock.patch.object(event.OPENER, "open", side_effect=exc):
                 with self.assertRaises(event.ApiError) as ctx:
                     api.get("/z")
             self.assertIsNone(ctx.exception.status)
         bad = FakeResponse(None)
         bad.raw = b"<html>" + BAD_IP.encode()
-        with mock.patch("urllib.request.urlopen", lambda req, timeout: bad):
+        with mock.patch.object(event.OPENER, "open", lambda req, timeout: bad):
             with self.assertRaises(event.ApiError) as ctx:
                 api.get("/z")
         self.assertEqual(str(ctx.exception), "GET /z: the response is not JSON")
+
+    def test_redirects_are_refused(self) -> None:
+        handler = next(h for h in event.OPENER.handlers if isinstance(h, urllib.request.HTTPRedirectHandler))
+        self.assertIsInstance(handler, event._NoRedirect)
+        req = urllib.request.Request("https://api.example.org/x", method="POST", data=b"{}")
+        with self.assertRaises(event.ApiError) as ctx:
+            handler.redirect_request(req, io.BytesIO(b""), 301, "Moved", {}, "http://evil.example.net/y")
+        self.assertEqual(ctx.exception.status, 301)
+
+    def test_the_token_never_rides_a_redirect(self) -> None:
+        api = event.RestApi("https://api.example.org", "tok")
+        seen: list[Any] = []
+
+        def fake_open(req: Any, timeout: int) -> FakeResponse:
+            seen.append(req)
+            return FakeResponse({})
+
+        with mock.patch.object(event.OPENER, "open", fake_open):
+            api.get("/x")
+        self.assertIn("Authorization", seen[0].unredirected_hdrs)
+        self.assertNotIn("Authorization", seen[0].headers)
+
+    def test_graphql_errors_are_api_errors(self) -> None:
+        api = event.RestApi("https://api.example.org", "tok")
+        for answer in ({"errors": [{"message": "x " + BAD_IP}]}, {"data": None}, ["x"]):
+            with mock.patch.object(event.OPENER, "open", lambda req, timeout, a=answer: FakeResponse(a)):
+                with self.assertRaises(event.ApiError) as ctx:
+                    api.graphql("query { x }", {})
+            self.assertNotIn(BAD_IP, str(ctx.exception))
+        with mock.patch.object(event.OPENER, "open", lambda req, timeout: FakeResponse({"data": {"ok": 1}})):
+            self.assertEqual(api.graphql("query { x }", {}), {"ok": 1})
+
+    def test_the_time_budget_stops_requests(self) -> None:
+        api = event.RestApi("https://api.example.org", "tok")
+        event._Deadline.start(-1)
+        try:
+            with self.assertRaises(event.ApiError):
+                api.get("/x")
+        finally:
+            event._Deadline.end = None
 
     def test_gitlab_auth_header_and_json_bodies(self) -> None:
         api = event.RestApi("https://gitlab.example.org/api/v4", "glt", gitlab=True)
@@ -301,7 +387,7 @@ class RestApiTests(unittest.TestCase):
             seen.append(req)
             return FakeResponse({"ok": True})
 
-        with mock.patch("urllib.request.urlopen", fake_urlopen):
+        with mock.patch.object(event.OPENER, "open", fake_urlopen):
             self.assertEqual(api.patch("/n", {"body": "x"}), {"ok": True})
         self.assertEqual(seen[0].get_header("Private-token"), "glt")
         self.assertIsNone(seen[0].get_header("Authorization"))

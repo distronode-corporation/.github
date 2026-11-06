@@ -109,4 +109,4 @@ jobs:
           persist-credentials: false
 
       - name: Unit tests
-        run: python3 -I -m unittest discover -v -s .github/public-hygiene -t .github/public-hygiene
+        run: python3 -I -B -m unittest discover -v -s .github/public-hygiene -t .github/public-hygiene
