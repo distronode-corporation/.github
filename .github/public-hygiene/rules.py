@@ -221,9 +221,10 @@ TOKEN_PATTERNS = (
     ),
     # The same with a camelCase key (`clientSecret`, `dbPassword`, `refreshToken`,
     # `secretKey`, `privateKey`), case-sensitive so that `publicKey` and `monkey` are not
-    # keys. Go's `:=` and PHP's `=>` count as delimiters in both.
+    # keys, and a PHP or PowerShell `$` in front is allowed (`$clientSecret = ...`). Go's
+    # `:=` and PHP's `=>` count as delimiters in both.
     _c(
-        r"(?<![\w$-])(?:[a-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3}(?:Secret|Password|Passwd|Pwd|Token)"
+        r"(?<![\w-])(?:[a-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3}(?:Secret|Password|Passwd|Pwd|Token)"
         r"|(?:[a-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3})?(?:[Ss]ecret|[Pp]rivate|[Aa]ccess|[Ss]igning|[Aa]pi|[Ee]ncryption|[Mm]aster)Key)"
         r"(?![a-z])['\"]?\s*+(?::=|=>|[:=])\s*+['\"`]?[^\s'\"`,;)<>]{8,200}"
     ),

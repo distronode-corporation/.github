@@ -236,6 +236,9 @@ class GoPhpAndCamelCaseKeys(Case):
             f"privateKey := {v}",
             f'"clientSecret": "{v}"',
             f"signingKey => {v}",
+            f'$clientSecret = "{v}"',  # PHP and PowerShell variables
+            f"$dbPassword = '{v}'",
+            f'$refreshToken := "{v}"',
         ])
 
     def test_placeholders_and_references_stay_quiet(self) -> None:
@@ -245,6 +248,8 @@ class GoPhpAndCamelCaseKeys(Case):
             "clientSecret: process.env.CLIENT_SECRET_2",
             "dbPassword = YOUR_DB_PASSWORD_HERE_2",
             "refreshToken: ${{ secrets.REFRESH_TOKEN_2 }}",
+            "$clientSecret = getenv(CLIENT_SECRET_2)",
+            "$dbPassword = $env:DB_PASSWORD",
         ])
 
     def test_not_keys(self) -> None:
