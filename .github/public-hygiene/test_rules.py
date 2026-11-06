@@ -64,6 +64,7 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "password=" + "there4" + "Real9xQ",
             "api_key: " + "Yourself7" + "Qz2kL",
             "token=" + "Sampled42" + "Lq9vZ",
+            "token=" + "envoy7Qz" + "Lq9vZ2",  # a word that starts like a reference
             "password: " + "S3cure!" + "Pass#2041",
             "the demo account pass" + "word is " + "Zq8" + "rT2vLx9",
             "pw=" + "Kx92mLq" + "7ZtPq",
@@ -92,6 +93,9 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "api_key: ${{ secrets.WIDGET_API_KEY }}",
             "token=secrets.WIDGET_TOKEN_2",
             "token:vars.WIDGET_TOKEN_NAME",
+            "apiKey: process.env.WIDGET_API_KEY_2",
+            "token = import.meta.env.VITE_WIDGET_TOKEN_9",
+            "password = os.environ.get",
             "a token was refreshed",
             "sk-short",
             "postgres://user:password@localhost/app",

@@ -232,7 +232,10 @@ PLACEHOLDER_WORDS_IN_VALUE = frozenset(
     {"your", "here", "example", "placeholder", "sample", "dummy", "redacted", "changeme", "todo", "fixme", "insert", "replace"}
 )
 VALUE_WORD = _c(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
-TEMPLATE_PREFIX = _c(r"(?:secrets|vars|env|inputs|steps|github)\.", IC)
+# A reference to where the value comes from, not the value: a workflow expression
+# (`secrets.NAME`), or code (`process.env.NAME`, `import.meta.env.NAME`, `os.environ`,
+# `os.getenv`). Up to three dotted parts may come first.
+TEMPLATE_PREFIX = _c(r"(?:[A-Za-z_$][\w$]{0,30}\.){0,3}(?:secrets|vars|env|inputs|steps|github|environ|getenv)\b", IC)
 
 
 def _is_placeholder_value(value: str) -> bool:
