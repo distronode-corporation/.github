@@ -240,11 +240,17 @@ URL_PASSWORD = _c(r"://[^\s/:@]*:([^\s/@]+)@")
 # `%(x)s`, a whole `$NAME`, `%NAME%`). A value that is a template and little else is a
 # placeholder; a real secret that merely holds a brace or a percent sign is not. Spans
 # are bounded, and a value is at most 200 characters.
-TEMPLATE_SPAN = _c(
-    r"\$\{\{.{0,200}?(?:\}\}|$)|\$\{[^{}]{0,200}(?:\}|$)|\$\([^()]{0,200}(?:\)|$)|\{\{.{0,200}?(?:\}\}|$)"
-    r"|\{%.{0,200}?(?:%\}|$)|\{[A-Za-z_][\w.\-]{0,100}\}|%\([^()]{0,100}(?:\)s?|$)"
+_TEMPLATE_SPAN_PARTS = (
+    r"\$\{\{.{0,200}?(?:\}\}|{END})|\$\{[^{}]{0,200}(?:\}|{END})|\$\([^()]{0,200}(?:\)|{END})|\{\{.{0,200}?(?:\}\}|{END})"
+    r"|\{%.{0,200}?(?:%\}|{END})|\{[A-Za-z_][\w.\-]{0,100}\}|%\([^()]{0,100}(?:\)s?|{END})"
     r"|^\$(?:[A-Z_][A-Z0-9_]*|[a-z_][a-z0-9_]*)$|%[A-Z_][A-Z0-9_]{2,}%|^%[a-z_][a-z0-9_]*%$"
 )
+# Closed templates only. An opener with no closer is a template only where the value
+# itself was cut short by a character values cannot hold (`$(gh auth token)` stops at
+# the space; `{{ .Values.x }}` at the first space): TEMPLATE_SPAN_CUT accepts the end of
+# the value as the closer, and is used only then.
+TEMPLATE_SPAN = _c(_TEMPLATE_SPAN_PARTS.replace("|{END}", ""))
+TEMPLATE_SPAN_CUT = _c(_TEMPLATE_SPAN_PARTS.replace("{END}", "$"))
 # A mask or an angle-bracket placeholder: never a secret, whatever surrounds it.
 MASK_SHAPE = _c(r"<[^<>]+>|\*{3,}")
 PLACEHOLDER_WORDS = frozenset(
@@ -296,15 +302,18 @@ def _split(word: str) -> list[str] | None:
     return parts
 
 
-def _is_placeholder_value(value: str) -> bool:
+def _is_placeholder_value(value: str, cut: bool = False) -> bool:
+    """`cut`: the value was cut short by a character values cannot hold, so an opener
+    whose closer lies beyond the cut still counts as a template."""
+    spans_re = TEMPLATE_SPAN_CUT if cut else TEMPLATE_SPAN
     if TEMPLATE_PREFIX.match(value) or MASK_SHAPE.search(value):
         return True
     # A value that is mostly template (`prefix-${NAME}`) is a placeholder; a template span
     # inside a value that is mostly not (`Kx9{name}Lq7ZtPq2`) is a value.
-    spans = sum(m.end() - m.start() for m in TEMPLATE_SPAN.finditer(value))
+    spans = sum(m.end() - m.start() for m in spans_re.finditer(value))
     if spans * 2 >= len(value):
         return True
-    rest = TEMPLATE_SPAN.sub(" ", value)
+    rest = spans_re.sub(" ", value)
     # `CHANGE_ME` or a placeholder word marks a placeholder only when what is left, besides
     # them, filler words and digits, is too short to be a secret: `Sample42Lq9vZ` keeps
     # `Lq`, `v`, `Z`.
@@ -327,6 +336,9 @@ def _is_placeholder_value(value: str) -> bool:
     return marked and residue < 4
 
 
+VALUE_CUT_CHARS = frozenset(")'\"`,;<> \t\n")
+
+
 def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
     """Drop the shapes test fixtures and documentation use: one repeated character, a
     short alphabet, the AWS documentation key, placeholders."""
@@ -344,7 +356,10 @@ def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
         # `token=x` also matches at `token`, so the captured value can start with the
         # delimiter; strip it before the placeholder test.
         value = assignment.group(1).lstrip(":='\"`")
-        if _is_placeholder_value(value):
+        # The character after the match, in the text: a quote, a space or a closing
+        # parenthesis there means the value was cut short at it.
+        cut = text[m.end() : m.end() + 1] in VALUE_CUT_CHARS
+        if _is_placeholder_value(value, cut):
             return False
         return bool(re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) and len(set(value)) >= 8
     body = re.sub(r"^[A-Za-z]+[_\-]", "", found)

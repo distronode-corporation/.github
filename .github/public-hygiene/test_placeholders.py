@@ -189,6 +189,18 @@ class EmbeddedPlaceholderShapes(Case):
             J(["password=", "Kx92${a}", "Lq7ZtPqW"]),
         ])
 
+    def test_an_unclosed_opener_is_a_value_unless_the_value_was_cut(self) -> None:
+        # Seer: an opener with no closer used to count as a template to the end of the
+        # value, so `$(...` at the start of a real secret hid it.
+        self.fire([
+            J(["password=", "$(Kx92m", "Lq7ZtPqW"]),
+            J(["token=", "${Kx92m", "Lq7ZtPqW"]),
+            J(["password=", "%(Kx92m", "Lq7ZtPqW"]),
+            J(["password=", "{{Kx92m", "Lq7ZtPqW"]),
+        ])
+        # Cut at a space or a closing parenthesis: the closer is just beyond the value.
+        self.quiet(["token=$(gh auth token2)", 'token: "{{ .Values.token2 }}"', "password: '%(db_password_2)s'"])
+
     def test_values_that_are_mostly_a_template_stay_quiet(self) -> None:
         self.quiet([
             "token=${WIDGET_TOKEN_2}",
