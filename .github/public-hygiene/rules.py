@@ -303,8 +303,8 @@ def _split(word: str) -> list[str] | None:
 
 
 def _is_placeholder_value(value: str, cut: bool = False) -> bool:
-    """`cut`: the value was cut short by a character values cannot hold, so an opener
-    whose closer lies beyond the cut still counts as a template."""
+    """`cut`: the value ends inside a template whose closer follows just after it, so the
+    unclosed opener at its end still counts as a template."""
     spans_re = TEMPLATE_SPAN_CUT if cut else TEMPLATE_SPAN
     if TEMPLATE_PREFIX.match(value) or MASK_SHAPE.search(value):
         return True
@@ -336,7 +336,21 @@ def _is_placeholder_value(value: str, cut: bool = False) -> bool:
     return marked and residue < 4
 
 
-VALUE_CUT_CHARS = frozenset(")'\"`,;<> \t\n")
+# Each template opener and its closer, longest opener first.
+TEMPLATE_CLOSERS = (("${{", "}}"), ("${", "}"), ("$(", ")"), ("{{", "}}"), ("{%", "%}"), ("%(", ")"))
+
+
+def _template_continues(value: str, tail: str) -> bool:
+    """Whether `value` ends inside a template whose closer follows in `tail` (the rest of
+    the line after the value): `$(gh auth token)` stops at the space, and its `)` is in
+    the tail. An opener whose closer never comes is not a template."""
+    best = -1
+    closer = ""
+    for opener, close in TEMPLATE_CLOSERS:
+        i = value.rfind(opener)
+        if i > best and close not in value[i + len(opener) :]:
+            best, closer = i, close
+    return best >= 0 and closer in tail
 
 
 def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
@@ -356,10 +370,10 @@ def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
         # `token=x` also matches at `token`, so the captured value can start with the
         # delimiter; strip it before the placeholder test.
         value = assignment.group(1).lstrip(":='\"`")
-        # The character after the match, in the text: a quote, a space or a closing
-        # parenthesis there means the value was cut short at it.
-        cut = text[m.end() : m.end() + 1] in VALUE_CUT_CHARS
-        if _is_placeholder_value(value, cut):
+        # The value may end inside a template the value pattern could not hold (a space or
+        # a parenthesis cut it); it counts as one only if its closer follows on the line.
+        tail = text[m.end() : m.end() + 200].split("\n", 1)[0]
+        if _is_placeholder_value(value, _template_continues(value, tail)):
             return False
         return bool(re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) and len(set(value)) >= 8
     body = re.sub(r"^[A-Za-z]+[_\-]", "", found)

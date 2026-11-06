@@ -200,6 +200,13 @@ class EmbeddedPlaceholderShapes(Case):
         ])
         # Cut at a space or a closing parenthesis: the closer is just beyond the value.
         self.quiet(["token=$(gh auth token2)", 'token: "{{ .Values.token2 }}"', "password: '%(db_password_2)s'"])
+        # Seer round 2: a real secret with an unclosed opener, then a space, a quote or a
+        # line end, is still a value: no closer follows.
+        self.fire([
+            J(["password=", "$(Kx92m", "Lq7ZtPqW", " and more text"]),
+            J(['token: "', "${Kx92m", 'Lq7ZtPqW"']),
+            J(["password=", "{{Kx92m", "Lq7ZtPqW", "\nnext line }}"]),  # the closer is on another line
+        ])
 
     def test_values_that_are_mostly_a_template_stay_quiet(self) -> None:
         self.quiet([
