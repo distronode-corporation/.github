@@ -144,6 +144,28 @@ class Sweep(unittest.TestCase):
         status, _ = run(dict(ENV, GITHUB_REPOSITORY_OWNER=""), gh, FakeGitLab())
         self.assertEqual(status, 2)
 
+    def test_one_unreadable_part_does_not_stop_the_sweep(self) -> None:
+        gh = FakeGitHub()
+        gh.data["/orgs/octo/repos?type=public"].insert(0, {"full_name": "octo/noissues"})
+        original = gh.get_all
+
+        def get_all(path: str) -> list[Any]:
+            if path.startswith("/repos/octo/noissues/issues?"):
+                raise event.ApiError("GET /repos/octo/noissues/issues: HTTP 410")
+            if path.startswith("/repos/octo/noissues/"):
+                return []
+            return original(path)
+
+        gh.get_all = get_all  # type: ignore[method-assign]
+        gl = FakeGitLab()
+        status, log = run(ENV, gh, gl)
+        self.assertEqual(status, 1)
+        body = gl.notes[0][1]["body"]
+        self.assertIn("octo/noissues: issues and pull requests", body)
+        self.assertIn(f"{HTML}/pull/7", body)  # the next repository was still read
+        self.assertIn("1 part(s) could not be read", log)
+        self.assertNotIn("noissues", log)
+
     def test_ids_must_be_numeric(self) -> None:
         with self.assertRaises(event.ApiError):
             sweep.post_report(FakeGitLab(), "group/project", "4", "x")

@@ -207,6 +207,7 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "resolve through 1.1.1.1",
             "at 12:30:45 UTC",
             "allow 0.0.0.0/0",
+            "moves from 0.4.9.1 to 0.4.9.2",
             "999.10.10.10 is not an address",
             "it ships as 3.0.12.0",
             "2a::b::c is not an address",
@@ -266,12 +267,18 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
         [
             "https://llm.internal/v1",
             "redis.default.svc.cluster.local:6379",
-            "build-box.local",
+            "talks to web.default.svc.cluster.local",
+            "ssh admin@build-box.local",
+            "reach db.corp:5432 first",
+            "fetch from vault.lan/v1/kv",
             "https://origin-us." + DOMAIN + "/api",
         ],
         [
             "mode: .internal and KnowledgeMode.internal",
             "appsettings.local.json",
+            "`self.local` and `config.internal` are fields",
+            "at okhttp3.internal.http.RealInterceptorChain",
+            "build-box.local in a sentence",
             "https://www." + DOMAIN + "/pricing",
             "originate." + DOMAIN,
         ],
@@ -320,7 +327,8 @@ class RuleCases(unittest.TestCase):
     def test_skipped_authors_need_the_bot_type(self) -> None:
         self.assertTrue(rules.is_skipped_author("dependabot[bot]", "Bot"))
         self.assertFalse(rules.is_skipped_author("dependabot[bot]", "User"))
-        self.assertFalse(rules.is_skipped_author("sentry[bot]", "Bot"))
+        self.assertTrue(rules.is_skipped_author("sentry[bot]", "Bot"))
+        self.assertFalse(rules.is_skipped_author("someone[bot]", "Bot"))
         self.assertFalse(rules.is_skipped_author(None, None))
 
 

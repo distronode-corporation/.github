@@ -60,11 +60,14 @@ def _user(item: dict[str, Any]) -> tuple[str | None, str | None]:
     return u.get("login"), u.get("type")
 
 
-def collect(api: Api, org: str, since: dt.datetime) -> tuple[list[Hit], int]:
-    """Findings in public text changed since `since`, and how many texts were read."""
+def collect(api: Api, org: str, since: dt.datetime) -> tuple[list[Hit], int, list[str]]:
+    """Findings in public text changed since `since`, how many texts were read, and what
+    could not be read ("repo: what"). One unreadable endpoint (issues turned off, a rate
+    limit, a network error) skips that part only; the sweep goes on with the rest."""
     stamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
     hits: list[Hit] = []
     scanned = 0
+    unreadable: list[str] = []
 
     def check(repo: str, kind: str, item: dict[str, Any], texts: tuple[str | None, ...]) -> None:
         nonlocal scanned
@@ -82,24 +85,32 @@ def collect(api: Api, org: str, since: dt.datetime) -> tuple[list[Hit], int]:
         if repo.get("private") or repo.get("archived"):
             continue
         name = repo["full_name"]
-        for item in api.get_all(f"/repos/{name}/issues?state=all&since={stamp}"):
+
+        def read(what: str, path: str) -> list[Any]:
+            try:
+                return api.get_all(path)
+            except ApiError:
+                unreadable.append(f"{name}: {what}")
+                return []
+
+        for item in read("issues and pull requests", f"/repos/{name}/issues?state=all&since={stamp}"):
             kind = "pull request" if "pull_request" in item else "issue"
             check(name, kind, item, (item.get("title"), item.get("body")))
             if kind == "pull request":
-                for review in api.get_all(f"/repos/{name}/pulls/{int(item['number'])}/reviews"):
+                for review in read(f"reviews of #{int(item['number'])}", f"/repos/{name}/pulls/{int(item['number'])}/reviews"):
                     if _after(review.get("submitted_at"), since):
                         check(name, "review", review, (review.get("body"),))
-        for c in api.get_all(f"/repos/{name}/issues/comments?since={stamp}"):
+        for c in read("comments", f"/repos/{name}/issues/comments?since={stamp}"):
             check(name, "comment", c, (c.get("body"),))
-        for c in api.get_all(f"/repos/{name}/pulls/comments?since={stamp}"):
+        for c in read("review comments", f"/repos/{name}/pulls/comments?since={stamp}"):
             check(name, "review comment", c, (c.get("body"),))
-        for release in api.get_all(f"/repos/{name}/releases"):
+        for release in read("releases", f"/repos/{name}/releases"):
             if _after(release.get("published_at") or release.get("created_at"), since):
                 check(name, "release", release, (release.get("name"), release.get("body")))
-    return hits, scanned
+    return hits, scanned, unreadable
 
 
-def render_note(hits: list[Hit], scanned: int, since: dt.datetime) -> str:
+def render_note(hits: list[Hit], scanned: int, since: dt.datetime, unreadable: list[str] | None = None) -> str:
     lines = [
         f"### Public hygiene sweep, text since {since:%Y-%m-%d}",
         "",
@@ -112,6 +123,9 @@ def render_note(hits: list[Hit], scanned: int, since: dt.datetime) -> str:
     for h in hits:
         url = h.url if re.fullmatch(r"https://github\.com/\S+", h.url) else "(no link)"
         lines.append(f"| {h.repo} | {h.kind}: {url} | {', '.join(f'`{i}`' for i in h.ids)} |")
+    if unreadable:
+        lines += ["", "Not read this week (checked again next week):", ""]
+        lines += [f"- {u}" for u in unreadable]
     return "\n".join(lines)
 
 
@@ -139,14 +153,16 @@ def run(env: dict[str, str], github: Api | None = None, gitlab: Api | None = Non
     github = github or RestApi(env.get("GITHUB_API_URL", "https://api.github.com"), env.get("GH_TOKEN", ""))
     gitlab = gitlab or RestApi(env.get("GITLAB_API", "https://gitlab.com/api/v4"), token, gitlab=True)
 
-    hits, scanned = collect(github, org, since)
+    hits, scanned, unreadable = collect(github, org, since)
     repos = len({h.repo for h in hits})
     print(f"Read {scanned} public texts changed in the last {days} days; {len(hits)} with findings in {repos} repositories.")
-    if not hits:
-        return 0
-    post_report(gitlab, project, issue, render_note(hits, scanned, since))
-    print("Report posted to the confidential GitLab issue.")
-    return 0
+    if unreadable:
+        print(f"::warning::{len(unreadable)} part(s) could not be read; the report lists them.")
+    if hits or unreadable:
+        post_report(gitlab, project, issue, render_note(hits, scanned, since, unreadable))
+        print("Report posted to the confidential GitLab issue.")
+    # A partial read still posts what it found, and then fails the run so it is seen.
+    return 1 if unreadable else 0
 
 
 def main() -> int:

@@ -80,9 +80,19 @@ COMPANY_DOMAINS = ("distronode.com", "distronode.ca")
 PUBLIC_ADDRESSES = frozenset({"opensource@distronode.com"})
 
 # Authors whose text is generated from public upstream content (release notes, changelogs)
-# and is skipped. Matched on login AND account type, so a user named like a bot is still
+# or from the public diff, and is skipped. Matched on login AND account type, so a user named like a bot is still
 # scanned.
-SKIPPED_BOTS = frozenset({"dependabot[bot]", "github-actions[bot]", "renovate[bot]"})
+# Code review bots are skipped too: what they quote comes from the pull request's own
+# public diff, and their comments cannot be edited by anyone here.
+SKIPPED_BOTS = frozenset(
+    {
+        "dependabot[bot]",
+        "github-actions[bot]",
+        "renovate[bot]",
+        "sentry[bot]",
+        "copilot-pull-request-reviewer[bot]",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -389,7 +399,7 @@ DOC_NETS = tuple(
         "198.51.100.0/24",
         "203.0.113.0/24",
         "127.0.0.0/8",
-        "0.0.0.0/32",
+        "0.0.0.0/8",  # "this network": never a host, and the shape of 0.x versions
         "255.255.255.255/32",
         "2001:db8::/32",
         "::1/128",
@@ -495,8 +505,15 @@ CLOUD_RESOURCE = (
 
 # From check-public-hygiene.py: private-use host suffixes, lower case only (a qualified
 # enum case such as `Mode.internal` is not a host), and the origins behind the edge.
+#
+# Narrower than the file check, because prose quotes code: `self.local`, `config.internal`
+# and the `okhttp3.internal` package read as host names. A cluster-local service name is
+# always a host; the other suffixes count only in a host's position: after `://` or `@`,
+# or before a port or a path.
+CLUSTER_LOCAL = _c(r"(?<![\w.\-])(?:[a-z0-9\-]+\.)+svc\.cluster\.local(?![\w\-])")
 INTERNAL_SUFFIX = _c(
-    r"(?<![\w.\-])((?:[a-z0-9\-]+\.)+(?:svc\.cluster\.local|internal|local|lan|corp))(?![\w\-]|\.\w)"
+    r"(?:(?<=://)|(?<=@))(?:[a-z0-9\-]+\.)+(?:internal|local|lan|corp)(?![\w\-]|\.\w)"
+    r"|(?<![\w.\-])(?:[a-z0-9\-]+\.)+(?:internal|local|lan|corp)(?=:\d|/)"
 )
 ORIGIN_HOST = _c(r"(?<![\w.\-])(origin(?:-[a-z0-9]+)*\.distronode\.(?:com|ca))(?![\w\-])", IC)
 
@@ -546,7 +563,7 @@ RULES: tuple[Rule, ...] = (
     Rule("cloud-resource", "A cloud resource id or internal host name (EC2 and VPC ids, origin hosts by machine name).",
          _spans(*CLOUD_RESOURCE)),
     Rule("internal-host", "An internal host name: .internal, .local, .lan, .corp, cluster-local services, and the origins behind the edge.",
-         _spans(INTERNAL_SUFFIX, ORIGIN_HOST)),
+         _spans(CLUSTER_LOCAL, INTERNAL_SUFFIX, ORIGIN_HOST)),
 )
 
 RULES_BY_ID = {rule.id: rule for rule in RULES}
