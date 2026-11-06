@@ -587,7 +587,9 @@ class Limits(unittest.TestCase):
         # GitHub caps a body at 65,536 characters. Each shape here once made a pattern
         # quadratic (seconds to minutes for one body); each must now take well under that.
         units = ("a-", "a.", ".", "eyJa.", "A_", "a@", "a://b@", "1.", "x@y.", "1-", "i-0", "sk-a",
-                 "kubectl -n ", "-n kubectl ", "kubectl --context=a ", "a/", "a's ", "a#1 ")
+                 "kubectl -n ", "-n kubectl ", "kubectl --context=a ", "a/", "a's ", "a#1 ",
+                 "--password ", "password: |\n ", "define('password', ", "ConvertTo-SecureString -Force ",
+                 "password='a ", "password='''")
         shapes = [(unit * (65536 // len(unit) + 1))[:65536] for unit in units]
         # A keyword, then a long run of whitespace: adjacent `\s*` once backtracked.
         shapes += [(kw + ws * 65536)[:65536] for kw in ("gitlab", "project number", "gcloud iam") for ws in (" ", "\n")]

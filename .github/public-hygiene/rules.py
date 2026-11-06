@@ -53,9 +53,14 @@ Documented exceptions (the allowlist), each next to the rule it narrows:
   versions (single-digit parts, a version word or operator before, a build suffix after).
 - `token`: test-fixture shapes (one repeated character, the AWS documentation key),
   placeholders (`YOUR_API_KEY_HERE`, `yourtokenhere`, `CHANGE_ME`, templates such as
-  `${X}`, `{{ x }}` and `%(x)s`, `<your-token>`, `****` masks), and code references
+  `${X}`, `{{ x }}` and `%(x)s`, `<your-token>`, `****` masks), variables (`$NAME`,
+  `$dbPassword2`, PowerShell's `$DbPassword2`, `%NAME%`), and code references
   (`secrets.NAME`, `process.env.NAME`, `os.environ[`, `os.getenv(`). A placeholder word
-  inside a value that keeps four or more other letters is still a value.
+  inside a value that keeps four or more other letters is still a value. A quoted value
+  with spaces is a value only when its words that are not prose hold a secret's shape.
+  The same tests apply to every key form: assignments, a flag and its value, YAML block
+  scalars, triple-quoted strings, PHP's `define` and PowerShell's
+  `ConvertTo-SecureString ... -AsPlainText`.
 - `private-path`: placeholder home directories and an app's own cache directory.
 - `secret-name-*`: the names every workflow uses, browser-public names, error codes, and
   names listed as an `.env.example` file's contents.
@@ -180,6 +185,23 @@ def _window(text: str, m: re.Match[str], before: int, after: int) -> str:
 
 # --------------------------------------------------------------------------- token
 
+# A snake, kebab or UPPER key with a secret word in it (`DB_PASSWORD`, `client-secret`,
+# `SECRET_KEY`, `api_key`), with a bounded prefix. Matched case-insensitively.
+_SNAKE_KEY = (
+    r"(?:[A-Za-z0-9]+[_\-]){0,4}"
+    r"(?:password|passwd|pwd|pw|secret|token|api[_\-]?key|api[_\-]?token|access[_\-]?token|auth[_\-]?token)"
+    r"(?:[_\-](?:access[_\-])?key)?"
+)
+# The value after a key: a quoted value with a space in it (`"Kx9 2mLq"`, group `spaced`,
+# judged by _spaced_value_is_real), or a run of non-space characters, bare, quoted or
+# triple-quoted (`"""value"""`, group `value`). Each part is bounded. A quoted value starts
+# with neither a space nor an operator and does not end in a space: in `"token="+t2, ""`
+# the quotes after the key close one string and open the next, around code.
+_VALUE = (
+    r"(?:(?P<q>['\"])(?=[^'\"\n]{0,200}?[ \t])(?P<spaced>[^'\"\s,+;)\]}][^'\"\n]{6,198}[^'\"\s])(?P=q)"
+    r"|(?:\"\"\"|'''|['\"`])?(?P<value>[^\s'\"`,;)<>]{8,200}))"
+)
+
 TOKEN_PATTERNS = (
     _c(r"(?<![\w-])gh[pousr]_[A-Za-z0-9]{36,}(?![\w-])"),
     _c(r"(?<![\w-])github_pat_[A-Za-z0-9_]{50,}"),
@@ -213,12 +235,7 @@ TOKEN_PATTERNS = (
     # `CLIENT_SECRET:`, `--password=`), with a key suffix (`SECRET_KEY`) and a quoted key
     # (`"password":`). The lookbehind refuses a start after a hyphen and the prefix is
     # bounded, so a long `a-a-a-...` chain is linear.
-    _c(
-        r"(?<![\w-])(?:-{1,2})?(?:[A-Za-z0-9]+[_\-]){0,4}"
-        r"(?:password|passwd|pwd|pw|secret|token|api[_\-]?key|api[_\-]?token|access[_\-]?token|auth[_\-]?token)"
-        r"(?:[_\-](?:access[_\-])?key)?['\"]?\s*+(?::=|=>|[:=])\s*+['\"`]?(?P<value>[^\s'\"`,;)<>]{8,200})",
-        IC,
-    ),
+    _c(r"(?<![\w-])(?:-{1,2})?" + _SNAKE_KEY + r"['\"]?\s*+(?::=|=>|[:=])\s*+" + _VALUE, IC),
     # The same with a camelCase key (`clientSecret`, `dbPassword`, `refreshToken`,
     # `secretKey`, `privateKey`), case-sensitive so that `publicKey` and `monkey` are not
     # keys, and a PHP or PowerShell `$` in front is allowed (`$clientSecret = ...`). Go's
@@ -226,7 +243,31 @@ TOKEN_PATTERNS = (
     _c(
         r"(?<![\w-])(?:[A-Za-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3}(?:Secret|Password|Passwd|Pwd|Token)"
         r"|(?:[A-Za-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3})?(?:[Ss]ecret|[Pp]rivate|[Aa]ccess|[Ss]igning|[Aa]pi|[Ee]ncryption|[Mm]aster)Key)"
-        r"(?![a-z])['\"]?\s*+(?::=|=>|[:=])\s*+['\"`]?(?P<value>[^\s'\"`,;)<>]{8,200})"
+        r"(?![a-z])['\"]?\s*+(?::=|=>|[:=])\s*+" + _VALUE
+    ),
+    # A flag and its value as separate arguments (`--password VALUE`, `--api-key "a b"`).
+    # The dashes are required here, and a flag with more after its key (`--password-stdin`,
+    # `--token-file`) is not this key, and a value starting with `-` is the next argument
+    # (`--no-password --port=5432`). A value that opens as a `key=value` option list
+    # (BuildKit's `--secret id=npmrc,src=...`) is the option, not the secret. Padding
+    # (`...=`, `...==`) is not a key. The known gap: an all-lowercase alphanumeric value with
+    # an `=` and more characters after it within its first 32 characters, a shape no base64
+    # or hex secret has.
+    _c(r"(?<![\w-])-{1,2}" + _SNAKE_KEY + r"[ \t]++(?!['\"]?-)(?!['\"]?(?-i:[a-z][a-z0-9_\-]{0,30})=[^\s='\",])" + _VALUE, IC),
+    # A YAML block scalar: `password: |` (or `>-`, `|2`), the value on the next, indented
+    # line.
+    _c(r"(?<![\w-])" + _SNAKE_KEY + r"['\"]?[ \t]*+:[ \t]*+[|>][+\-]?[1-9]?[+\-]?[ \t]*+\n[ \t]++" + _VALUE, IC),
+    # PHP's `define('DB_PASSWORD', 'value')`: the key is a quoted string argument.
+    _c(r"\bdefine\s*+\(\s*+['\"]" + _SNAKE_KEY + r"['\"]\s*+,\s*+" + _VALUE, IC),
+    # PowerShell's `ConvertTo-SecureString 'value' -AsPlainText`: the string is the
+    # password itself only with `-AsPlainText`, before or after it on the same line.
+    _c(
+        r"\bConvertTo-SecureString(?:[ \t]++-Force\b)?[ \t]++(?:-String[ \t]++)?" + _VALUE + r"(?=[^\n]{0,100}?-AsPlainText\b)",
+        IC,
+    ),
+    _c(
+        r"\bConvertTo-SecureString(?:[ \t]++-Force\b)?[ \t]++-AsPlainText\b(?:[ \t]++-Force\b)?[ \t]++(?:-String[ \t]++)?" + _VALUE,
+        IC,
     ),
     # A password written in prose: `the password is ...`.
     _c(r"\bpassword\s++(?:is|was)\s++['\"`]?(?P<value>[^\s'\"`,;)<>]{8,200})", IC),
@@ -239,7 +280,8 @@ URL_VALUE = _c(r"[a-z][a-z0-9+.\-]{0,30}://(?:([^/?#@]*)@)?[^/?#]*", IC)
 URL_PARTS = _c(r"[/?&#;=]")
 # A template's whole span (`${X}`, `${{ x }}`, `$(cmd)`, `{{ x }}`, `{% x %}`, `{name}`,
 # `%(x)s`), or a whole value that is a variable (`$NAME`, `$name`, `$dbPassword2`,
-# `$env:NAME`, `%NAME%`, `%DbPassword2%`). A value that is a template and little else is a
+# `$env:NAME` (any case: `$Env:`, `$ENV:`), `%NAME%`, `%DbPassword2%`, PowerShell's `$DbPassword2`, whose words are
+# letters and whose digits end it). A value that is a template and little else is a
 # placeholder; a real secret that merely holds a brace, a dollar or a percent sign is not
 # (`%2B` is URL encoding). Closed templates only: an opener with no closer counts only
 # where the value was cut short and the rest of the line closes it (_template_cut_at).
@@ -248,7 +290,8 @@ TEMPLATE_SPAN = _c(
     r"\$\{\{.{0,200}?\}\}|\$\{[^{}]{0,200}\}|\$\([^()]{0,200}\)|\{\{.{0,200}?\}\}"
     r"|\{%.{0,200}?%\}|\{[A-Za-z_][\w.\-]{0,100}\}|%\([^()]{0,100}\)s?"
     r"|^\$(?:[A-Z_][A-Z0-9_]*|[a-z_][a-z0-9_]*)$|%[A-Z_][A-Z0-9_]{2,}%|^%[a-z_][a-z0-9_]*%$"
-    r"|^\$env:[A-Za-z_][A-Za-z0-9_]*$|^\$[a-z_][a-z0-9_]*(?:[A-Z][a-z0-9_]+)+$|^%[A-Za-z_][A-Za-z0-9_]{2,}%$"
+    r"|^\$(?i:env):[A-Za-z_][A-Za-z0-9_]*$|^\$[a-z_][a-z0-9_]*(?:[A-Z][a-z0-9_]+)+$|^%[A-Za-z_][A-Za-z0-9_]{2,}%$"
+    r"|^\$(?:[A-Z][a-z]+)+[0-9_]*$"
 )
 # A mask or an angle-bracket placeholder: never a secret, whatever surrounds it.
 MASK_SHAPE = _c(r"<[^<>]+>|\*{3,}")
@@ -376,6 +419,50 @@ def _value_is_real(value: str) -> bool:
     return bool(re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) and len(set(value)) >= 8
 
 
+# A word of prose: a word, a capitalized or upper-case word, or a number, or a few of them
+# joined by hyphens (`well-known`, the ranges `a-z` and `0-9`), with the punctuation prose
+# puts around it (`(a-z,`, `0-9).`). A version (`v2`, `v1.3.0`) is a word too.
+_PROSE_ATOM = r"(?:[vV]\d{1,6}+(?:\.\d{1,6}+){0,3}(?![A-Za-z])|[A-Za-z][a-z]*+(?:'[a-z]{1,2})?|[A-Z]++|\d++)"
+PROSE_WORD = _c(r"[(\[]?" + _PROSE_ATOM + r"(?:-" + _PROSE_ATOM + r"){0,4}[.,:;!?)\]]{0,2}")
+
+
+# Where a word of help text joins prose words: `8+`, `docs/v2/auth`, `key=value`.
+PROSE_JOINERS = _c(r"[/+:=&?#@*%~|]+")
+# A technical name written with its number (`SHA256`, `OAuth2`, `Base64`, `UTF8`, `X509`,
+# `IPv6`, `Ed25519`, `python3`, `sha256`): a known acronym, or one word of three or more
+# letters, then at most five digits. Judged on a WHOLE word of a spaced value only, never
+# as an atom of a hyphenated or joined one, so a grouped key (`XK92-MQ47-ZT81`) and a
+# short mixed chunk (`Kx92`, `mLq7`) are still judged.
+TECH_TERM = _c(
+    r"(?:(?i:sha|md|utf|http|aes|rsa|ec|es|rs|hs|ps|pkcs|iso|rfc|crc|tls|ssl|ipv|oauth|ed|x|p|s)"
+    r"|[A-Za-z][a-z]{2,15})\d{1,5}"
+)
+
+
+def _is_prose_word(word: str) -> bool:
+    """A prose word, a link that holds no secret (judged by _url_value_is_real), or prose
+    words joined by PROSE_JOINERS."""
+    if PROSE_WORD.fullmatch(word):
+        return True
+    bare = word.strip("()[].,:;!?'")
+    if TECH_TERM.fullmatch(bare):
+        return True
+    if URL_VALUE.match(bare):
+        return not _url_value_is_real(bare)
+    return all(not part or PROSE_WORD.fullmatch(part) for part in PROSE_JOINERS.split(bare))
+
+
+def _spaced_value_is_real(value: str) -> bool:
+    """A quoted value with spaces in it (`"Kx9 2mLq7Zt"`) is a secret when its words that
+    are not prose (`Kx9`, `2mLq7Zt`, not `Use`, `the`, `token`, `2`, `8+`, a docs link, or a
+    technical name with its number such as `SHA256` and `OAuth2`) hold eight or more
+    characters and, together, pass _value_is_real: `"Minimum 8 characters"` and `"Use the
+    API token from step 2"` are text. The known trade-off: a spaced secret made only of
+    word-plus-number chunks (`Kxqz92 Mabc47`) reads as prose."""
+    odd = "".join(w for w in value.split() if not _is_prose_word(w))
+    return len(odd) >= 8 and _value_is_real(odd)
+
+
 def _url_value_is_real(url: str) -> bool:
     """A URL as the value holds a secret only in its user info, a path segment or a query
     value (`https://hooks.example.com/services/T0/B0/<token>`), not in its host or its
@@ -396,7 +483,11 @@ def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
         # `postgres://user:password@localhost` and `://u:${PASS}@h` are documentation.
         secret = userinfo.group(1)
         return not (_is_placeholder_value(secret) or secret.lower() in PLACEHOLDER_WORDS or len(set(secret)) < 6)
-    value = m.groupdict().get("value")
+    groups = m.groupdict()
+    spaced = groups.get("spaced")
+    if spaced is not None:
+        return not _is_placeholder_value(spaced) and _spaced_value_is_real(spaced)
+    value = groups.get("value")
     if value is not None:
         # The value a key pattern captured. A URL is judged by its parts, each on its own,
         # so a placeholder word in its host neither hides nor makes a secret.
