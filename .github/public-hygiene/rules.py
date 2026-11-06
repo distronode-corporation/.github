@@ -394,9 +394,13 @@ VERSION_CONTEXT = _c(
     r"(?:\bv|\bversion\s*:?\s*|\bver\.?\s*|\brelease\s+|\bbuild\s+|\bmsix\s+|\bpackage\s+|\bpolicy\s+|\bsection\s+|"
     # Version operators only: a bare `@` or `=` is also how a host is written
     # (`user@host`, `HOST=addr`, `--server=addr`).
-    r"(?:==|>=|<=|~=|!=|\^|~|\u2192|->)\s*|\bbump(?:s|ed)?\s+)$",
+    r"(?:==|>=|<=|~=|!=|\^|~)\s*|\bbump(?:s|ed)?\s+)$",
     IC,
 )
+# An arrow from another version (`2.0.6 \u2192 2.0.6.1`, `1.2 -> 1.2.0.1`): an upgrade, not
+# a hop to a host (`LB -> addr` still counts).
+VERSION_ARROW = _c(r"\d+(?:\.\d+){1,3}\s*(?:->|\u2192)\s*$")
+VERSION_SUFFIX = _c(r"\+[0-9A-Za-z]|-(?:alpha|beta|rc|pre|preview|dev|snapshot|nightly)\b", IC)
 DOC_NETS = tuple(
     ipaddress.ip_network(n)
     for n in (
@@ -432,12 +436,14 @@ def _find_ip(text: str) -> Iterator[tuple[int, int]]:
         if not cidr:
             # A four-part version number (`3.0.1.0`): written after a version word, or
             # ending in .0, which a host address never does without a prefix length.
-            if VERSION_CONTEXT.search(text[max(0, m.start() - 16) : m.start()]):
+            before = text[max(0, m.start() - 40) : m.start()]
+            if VERSION_CONTEXT.search(before[-16:]) or VERSION_ARROW.search(before):
                 continue
             if m.group(1).endswith(".0"):
                 continue
-            # A build suffix (`26.0.2.1+1`, `1.2.3.4-beta`) makes it a version.
-            if re.match(r"[+\-][0-9A-Za-z]", text[m.end() : m.end() + 2]):
+            # A build suffix (`26.0.2.1+1`) or a pre-release tag (`1.2.3.4-beta`) makes it
+            # a version; `-prod` or a range (`addr-addr`) does not.
+            if VERSION_SUFFIX.match(text, m.end()):
                 continue
         yield m.start(), m.end()
     for m in IPV6.finditer(text):
@@ -577,8 +583,9 @@ _INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"), Non
 
 
 def normalize(text: str) -> str:
-    """NFKC, invisible characters removed, so a pasted zero-width space does not hide a
-    match. Offsets in findings refer to this form."""
+    """NFKC, line ends as LF, invisible characters removed, so a pasted zero-width space
+    does not hide a match. Offsets in findings refer to this form."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")  # CRLF bodies split into paragraphs too
     return unicodedata.normalize("NFKC", text).translate(_INVISIBLE)
 
 

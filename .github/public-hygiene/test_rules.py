@@ -78,6 +78,7 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "A secret manager such as 1Password holds it.",
             "Secret Manager is not involved.",
             "GSM\n\nAPI_KEY is unrelated, two paragraphs later.",
+            "GSM\r\n\r\nAPI_KEY is unrelated, in a CRLF body.",
         ],
     ),
     "secret-name-list": (
@@ -200,6 +201,10 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "ssh deploy@34.120.7.9",
             "HOST=34.120.7.9",
             "--server=34.120.7.9",
+            "LB -> 34.120.7.9",
+            "ingress \u2192 34.120.7.9",
+            "the 34.120.7.9-prod box",
+            "range 34.120.7.9-34.120.7.20",
             "v6 2600:1f18:abcd::1 answers",
         ],
         [
@@ -208,6 +213,8 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "version 3.0.1.4 ships",
             "jdom2 2.0.6 \u2192 2.0.6.1",
             "patch versions like 26.0.2.1+1",
+            "ships 4.2.1.3-beta to testers",
+            "1.2 -> 1.2.0.1",
             "failed on policy 10.1.1.3",
             "package 3.0.12.0 is signed",
             "resolve through 1.1.1.1",
