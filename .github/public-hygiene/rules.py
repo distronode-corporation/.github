@@ -258,7 +258,9 @@ def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
     assignment = ASSIGNMENT_VALUE.search(found)
     if assignment:
         # `password: Simulator.app` is prose; a value with no digit is a word, not a secret.
-        value = assignment.group(1)
+        # `token=x` also matches at `token`, so the captured value can start with the
+        # delimiter; strip it before the placeholder test.
+        value = assignment.group(1).lstrip(":='\"`")
         if _is_placeholder_value(value):
             return False
         return bool(re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) and len(set(value)) >= 8

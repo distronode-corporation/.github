@@ -90,6 +90,8 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "token=YourTokenHere2041",
             "password: xxxxxxxx1234",
             "api_key: ${{ secrets.WIDGET_API_KEY }}",
+            "token=secrets.WIDGET_TOKEN_2",
+            "token:vars.WIDGET_TOKEN_NAME",
             "a token was refreshed",
             "sk-short",
             "postgres://user:password@localhost/app",
