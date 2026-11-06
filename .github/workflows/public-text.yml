@@ -37,4 +37,4 @@ jobs:
       contents: read # the checker's checkout
       issues: write # read the thread; keep the one comment on an issue
       pull-requests: write # read reviews; keep the one comment on a pull request
-    uses: distronode-corporation/.github/.github/workflows/public-hygiene.yml@d3363f9f9529c1dc9778ba93ab86a76d1412b0d4 # public-hygiene branch; re-pinned to main after the merge
+    uses: distronode-corporation/.github/.github/workflows/public-hygiene.yml@96443797b584e3037f14ccde5a3ef216cbae98ab # public-hygiene branch; re-pinned to main after the merge
