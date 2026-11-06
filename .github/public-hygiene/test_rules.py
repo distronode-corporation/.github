@@ -55,6 +55,9 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "DB_" + "PASSWORD=" + "Hunter2" + "Hunter9xyz",
             "--pass" + "word=" + "Hunter2" + "Hunter9xyz",
             "CLIENT_" + "SECRET: " + fake("", 24),
+            "STRIPE_SECRET_" + "KEY=" + fake("", 24),
+            '{"pass' + 'word": "' + "Hunter2" + 'Hunter9xyz"}',
+            "postgres://app:" + "s3cr3tP4ss" + "w0rd@db.example.org/app",
         ],
         [
             "gh" + "p_" + "x" * 36,  # one repeated character: a fixture
@@ -63,6 +66,9 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "password: ${{ secrets.MATCH_PASSWORD }}",
             "a token was refreshed",
             "sk-short",
+            "postgres://user:password@localhost/app",
+            "redis://default:${REDIS_PASSWORD}@cache:6379",
+            "amqp://guest:<password>@queue.example.org",
         ],
     ),
     "secret-name-gsm": (
@@ -237,6 +243,7 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
         [
             f"https://{G}.com/distronode-corporation/district-ios",
             f"https://{G}.com/distronode-corporation/district-core-rust.git",
+            f"The mirror is https://{G}.com/distronode-corporation/district-ios.",
             f"https://{G}.com/distronode-corporation",
             f"https://{G}.gnome.org/GNOME/gtk/-/issues/1",
         ],

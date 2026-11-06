@@ -170,7 +170,8 @@ TOKEN_PATTERNS = (
         # The lookbehind refuses a start after a hyphen and the prefix is bounded, so a long
         # `a-a-a-...` chain is linear, not quadratic.
         r"(?<![\w-])(?:-{1,2})?(?:[A-Za-z0-9]+[_\-]){0,4}(?:password|passwd|secret|api[_\-]?key|access[_\-]?token|auth[_\-]?token)"
-        r"\s*[:=]\s*['\"]?[A-Za-z0-9_\-+/=.]{12,}",
+        # A key suffix (`SECRET_KEY`, `SECRET_ACCESS_KEY`) and a quoted key (`"password":`).
+        r"(?:[_\-](?:access[_\-])?key)?['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9_\-+/=.]{12,}",
         IC,
     ),
 )
@@ -182,6 +183,11 @@ def _token_payload_is_real(m: re.Match[str]) -> bool:
     text = m.group(0)
     if text.upper().endswith("EXAMPLE"):
         return False
+    userinfo = URL_PASSWORD.search(text)
+    if userinfo:
+        # `postgres://user:password@localhost` and `://u:${PASS}@h` are documentation.
+        secret = userinfo.group(1)
+        return not (PLACEHOLDER_CHARS.search(secret) or secret.lower() in PLACEHOLDER_WORDS or len(set(secret)) < 6)
     assignment = ASSIGNMENT_VALUE.search(text)
     if assignment:
         # `password: Simulator.app` is prose; a value with no digit is a word, not a secret.
@@ -192,6 +198,9 @@ def _token_payload_is_real(m: re.Match[str]) -> bool:
 
 
 ASSIGNMENT_VALUE = _c(r"[:=]\s*['\"]?([A-Za-z0-9_\-+/=.]{12,})$")
+URL_PASSWORD = _c(r"://[^\s/:@]+:([^\s/@]+)@")
+PLACEHOLDER_CHARS = _c(r"[$<>{}%*]")
+PLACEHOLDER_WORDS = frozenset({"password", "passwd", "pass", "secret", "changeme", "example", "redacted", "hunter2", "token", "xxxxxx"})
 
 
 # --------------------------------------------------------------------------- secret names
@@ -476,6 +485,7 @@ def _find_private_gitlab(text: str) -> Iterator[tuple[int, int]]:
         if project is None:
             continue  # the group page lists only public projects to the public
         name = project.lower()
+        name = name.rstrip(".")  # a sentence's full stop
         if name.endswith(".git"):
             name = name[: -len(".git")]
         if name in PUBLIC_GITLAB_PROJECTS:
@@ -540,7 +550,7 @@ PUBLIC_URL = _c(
     r"github\.com/|(?:[\w\-]+\.)?githubusercontent\.com/|"
     r"(?:www\.)?distronode\.(?:com|ca)(?:/|(?=[\s)\]>]|$))|"
     r"apps\.apple\.com/|play\.google\.com/|apps\.microsoft\.com/|"
-    r"gitlab\.com/distronode-corporation/(?:" + "|".join(sorted(PUBLIC_GITLAB_PROJECTS)) + r")(?![\w.\-])"
+    r"gitlab\.com/distronode-corporation/(?:" + "|".join(sorted(PUBLIC_GITLAB_PROJECTS)) + r")(?![\w\-]|\.\w)"
     r")[^\s)\]>\"'`]*",
     IC,
 )
