@@ -236,9 +236,17 @@ URL_PASSWORD = _c(r"://[^\s/:@]*:([^\s/@]+)@")
 # a template or a mask, not a character a real password may hold:
 # `${X}`, `$(cmd)`, `{{ x }}`, `{% x %}`, `{name}`, `%(x)s`, a whole `$NAME`, `%NAME%`, `<your-token>`,
 # `***`. A lone `$ % * { }` is a password character, and `%2B` is URL encoding.
-PLACEHOLDER_SHAPE = _c(
-    r"\$[{(]|\{[{%]|\{[A-Za-z_][\w.\-]*\}|%\(|^\$(?:[A-Z_][A-Z0-9_]*|[a-z_][a-z0-9_]*)$|%[A-Z_][A-Z0-9_]{2,}%|^%[a-z_][a-z0-9_]*%$|<[^<>]+>|\*{3,}"
+# A template's whole span (`${X}`, `${{ x }}`, `$(cmd)`, `{{ x }}`, `{% x %}`, `{name}`,
+# `%(x)s`, a whole `$NAME`, `%NAME%`). A value that is a template and little else is a
+# placeholder; a real secret that merely holds a brace or a percent sign is not. Spans
+# are bounded, and a value is at most 200 characters.
+TEMPLATE_SPAN = _c(
+    r"\$\{\{.{0,200}?(?:\}\}|$)|\$\{[^{}]{0,200}(?:\}|$)|\$\([^()]{0,200}(?:\)|$)|\{\{.{0,200}?(?:\}\}|$)"
+    r"|\{%.{0,200}?(?:%\}|$)|\{[A-Za-z_][\w.\-]{0,100}\}|%\([^()]{0,100}(?:\)s?|$)"
+    r"|^\$(?:[A-Z_][A-Z0-9_]*|[a-z_][a-z0-9_]*)$|%[A-Z_][A-Z0-9_]{2,}%|^%[a-z_][a-z0-9_]*%$"
 )
+# A mask or an angle-bracket placeholder: never a secret, whatever surrounds it.
+MASK_SHAPE = _c(r"<[^<>]+>|\*{3,}")
 PLACEHOLDER_WORDS = frozenset(
     {"password", "passwd", "pass", "secret", "changeme", "example", "redacted", "hunter2", "token", "xxxxxx"}
 )
@@ -289,12 +297,22 @@ def _split(word: str) -> list[str] | None:
 
 
 def _is_placeholder_value(value: str) -> bool:
-    if TEMPLATE_PREFIX.match(value) or PLACEHOLDER_SHAPE.search(value) or CHANGE_ME.search(value):
+    if TEMPLATE_PREFIX.match(value) or MASK_SHAPE.search(value):
         return True
-    # A placeholder word marks a placeholder only when what is left, besides filler words
-    # and digits, is too short to be a secret: `Sample42Lq9vZ` keeps `Lq`, `v`, `Z`.
-    marked, residue = False, 0
-    for w in VALUE_WORD.findall(value):
+    # A value that is mostly template (`prefix-${NAME}`) is a placeholder; a template span
+    # inside a value that is mostly not (`Kx9{name}Lq7ZtPq2`) is a value.
+    spans = sum(m.end() - m.start() for m in TEMPLATE_SPAN.finditer(value))
+    if spans * 2 >= len(value):
+        return True
+    rest = TEMPLATE_SPAN.sub(" ", value)
+    # `CHANGE_ME` or a placeholder word marks a placeholder only when what is left, besides
+    # them, filler words and digits, is too short to be a secret: `Sample42Lq9vZ` keeps
+    # `Lq`, `v`, `Z`.
+    marked = False
+    without = CHANGE_ME.sub(" ", rest)
+    marked = marked or without != rest
+    residue = 0
+    for w in VALUE_WORD.findall(without):
         w = w.lower()
         if w.isdigit():
             continue
@@ -319,7 +337,7 @@ def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
     if userinfo:
         # `postgres://user:password@localhost` and `://u:${PASS}@h` are documentation.
         secret = userinfo.group(1)
-        return not (PLACEHOLDER_SHAPE.search(secret) or secret.lower() in PLACEHOLDER_WORDS or len(set(secret)) < 6)
+        return not (_is_placeholder_value(secret) or secret.lower() in PLACEHOLDER_WORDS or len(set(secret)) < 6)
     assignment = ASSIGNMENT_VALUE.search(found)
     if assignment:
         # `password: Simulator.app` is prose; a value with no digit is a word, not a secret.

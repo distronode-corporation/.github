@@ -176,6 +176,29 @@ class R5MoreBranches(Case):
                 self.fire([J(["password=", word.capitalize(), ".Prod2041x"])])
 
 
+class EmbeddedPlaceholderShapes(Case):
+    """Seer on the follow-up: a template span or `CHANGE_ME` inside a value with enough
+    else in it is a value, not a placeholder."""
+
+    def test_real_values_with_an_embedded_shape_fire(self) -> None:
+        self.fire([
+            J(["password=", "Kx9{name}", "Lq7ZtPq2"]),
+            J(["token=", "Kx92changeme", "Lq7ZtPqW"]),
+            J(["password=", "Kx92change_it", "Lq7ZtPq"]),
+            J(["password=", "Kx92%NAME%", "Lq7ZtPqWm"]),
+            J(["password=", "Kx92${a}", "Lq7ZtPqW"]),
+        ])
+
+    def test_values_that_are_mostly_a_template_stay_quiet(self) -> None:
+        self.quiet([
+            "token=${WIDGET_TOKEN_2}",
+            "token=prefix-${WIDGET_TOKEN_2}",
+            "password=change_me_2041",
+            "password=ChangeMe2041",
+            "token: ****1234abcd",
+        ])
+
+
 class GoPhpAndCamelCaseKeys(Case):
     """O1: Go's `:=`, PHP's `=>` and camelCase keys reach the realness test, both ways."""
 
