@@ -414,9 +414,11 @@ def _value_is_real(value: str) -> bool:
     return bool(re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) and len(set(value)) >= 8
 
 
-# A word of prose: a word, a capitalized or upper-case word, or a number, with the
-# punctuation prose puts around it.
-PROSE_WORD = _c(r"[(\[]?(?:[A-Za-z][a-z]*+(?:'[a-z]{1,2})?|[A-Z]++|\d++)[.,:;!?)\]]?")
+# A word of prose: a word, a capitalized or upper-case word, or a number, or a few of them
+# joined by hyphens (`well-known`, the ranges `a-z` and `0-9`), with the punctuation prose
+# puts around it (`(a-z,`, `0-9).`).
+_PROSE_ATOM = r"(?:[A-Za-z][a-z]*+(?:'[a-z]{1,2})?|[A-Z]++|\d++)"
+PROSE_WORD = _c(r"[(\[]?" + _PROSE_ATOM + r"(?:-" + _PROSE_ATOM + r"){0,4}[.,:;!?)\]]{0,2}")
 
 
 def _spaced_value_is_real(value: str) -> bool:

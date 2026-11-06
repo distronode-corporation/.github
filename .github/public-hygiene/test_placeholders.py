@@ -479,6 +479,10 @@ class GapsLeftBy11(Case):
             '"password": "<your password>"',
             'password: "**** ****"',
             'password = "Enter your password: "',
+            # Ranges and hyphenated words are prose (Seer, round 1).
+            'password: "Use letters (a-z, A-Z, 0-9) and symbols"',
+            'password_hint: "Mix upper-case, lower-case and 0-9 digits."',
+            '"secret": "A well-known value for end-to-end tests"',
             # Code between two string literals, not a quoted value (the survey's two hits).
             'f.do(t, "GET", "/v1/verify?token="+magic2, "", "")',
             'J(["password=", chr(0x131) + "nputs.", "Kx92mLq7"])',
