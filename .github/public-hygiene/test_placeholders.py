@@ -546,5 +546,24 @@ class SeerRound4(Case):
         ])
 
 
+class SeerRound5(Case):
+    """Seer round 5 on #15: after a valueless or negated flag, an argument that starts with
+    `-` is the next flag, not the value."""
+
+    def test_the_next_flag_is_not_the_value(self) -> None:
+        self.quiet([
+            "pg_dump --no-password --port=5432 db",
+            "psql --no-password --dbname=app2",
+            '--password "--port=5432"',
+        ])
+
+    def test_real_flag_values_still_fire(self) -> None:
+        self.fire([
+            J(["--password ", "Kx92mLq7", "Zt"]),
+            J(['--token "', "Kx9 2mLq7", 'ZtPq"']),
+            J(["--api-key=", "Kx92mLq7", "ZtPq"]),  # the `=` form, a different pattern
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

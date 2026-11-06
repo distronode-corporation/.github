@@ -247,12 +247,13 @@ TOKEN_PATTERNS = (
     ),
     # A flag and its value as separate arguments (`--password VALUE`, `--api-key "a b"`).
     # The dashes are required here, and a flag with more after its key (`--password-stdin`,
-    # `--token-file`) is not this key. A value that opens as a `key=value` option list
+    # `--token-file`) is not this key, and a value starting with `-` is the next argument
+    # (`--no-password --port=5432`). A value that opens as a `key=value` option list
     # (BuildKit's `--secret id=npmrc,src=...`) is the option, not the secret. Padding
     # (`...=`, `...==`) is not a key. The known gap: an all-lowercase alphanumeric value with
     # an `=` and more characters after it within its first 32 characters, a shape no base64
     # or hex secret has.
-    _c(r"(?<![\w-])-{1,2}" + _SNAKE_KEY + r"[ \t]++(?!['\"]?(?-i:[a-z][a-z0-9_\-]{0,30})=[^\s='\",])" + _VALUE, IC),
+    _c(r"(?<![\w-])-{1,2}" + _SNAKE_KEY + r"[ \t]++(?!['\"]?-)(?!['\"]?(?-i:[a-z][a-z0-9_\-]{0,30})=[^\s='\",])" + _VALUE, IC),
     # A YAML block scalar: `password: |` (or `>-`, `|2`), the value on the next, indented
     # line.
     _c(r"(?<![\w-])" + _SNAKE_KEY + r"['\"]?[ \t]*+:[ \t]*+[|>][+\-]?[1-9]?[+\-]?[ \t]*+\n[ \t]++" + _VALUE, IC),
