@@ -427,6 +427,15 @@ PROSE_WORD = _c(r"[(\[]?" + _PROSE_ATOM + r"(?:-" + _PROSE_ATOM + r"){0,4}[.,:;!
 
 # Where a word of help text joins prose words: `8+`, `docs/v2/auth`, `key=value`.
 PROSE_JOINERS = _c(r"[/+:=&?#@*%~|]+")
+# A technical name written with its number (`SHA256`, `OAuth2`, `Base64`, `UTF8`, `X509`,
+# `IPv6`, `Ed25519`, `python3`, `sha256`): a known acronym, or one word of three or more
+# letters, then at most five digits. Judged on a WHOLE word of a spaced value only, never
+# as an atom of a hyphenated or joined one, so a grouped key (`XK92-MQ47-ZT81`) and a
+# short mixed chunk (`Kx92`, `mLq7`) are still judged.
+TECH_TERM = _c(
+    r"(?:(?i:sha|md|utf|http|aes|rsa|ec|es|rs|hs|ps|pkcs|iso|rfc|crc|tls|ssl|ipv|oauth|ed|x|p|s)"
+    r"|[A-Za-z][a-z]{2,15})\d{1,5}"
+)
 
 
 def _is_prose_word(word: str) -> bool:
@@ -435,6 +444,8 @@ def _is_prose_word(word: str) -> bool:
     if PROSE_WORD.fullmatch(word):
         return True
     bare = word.strip("()[].,:;!?'")
+    if TECH_TERM.fullmatch(bare):
+        return True
     if URL_VALUE.match(bare):
         return not _url_value_is_real(bare)
     return all(not part or PROSE_WORD.fullmatch(part) for part in PROSE_JOINERS.split(bare))
@@ -442,9 +453,11 @@ def _is_prose_word(word: str) -> bool:
 
 def _spaced_value_is_real(value: str) -> bool:
     """A quoted value with spaces in it (`"Kx9 2mLq7Zt"`) is a secret when its words that
-    are not prose (`Kx9`, `2mLq7Zt`, not `Use`, `the`, `token`, `2`, `8+`, a docs link)
-    hold eight or more characters and, together, pass _value_is_real: `"Minimum 8
-    characters"` and `"Use the API token from step 2"` are text."""
+    are not prose (`Kx9`, `2mLq7Zt`, not `Use`, `the`, `token`, `2`, `8+`, a docs link, or a
+    technical name with its number such as `SHA256` and `OAuth2`) hold eight or more
+    characters and, together, pass _value_is_real: `"Minimum 8 characters"` and `"Use the
+    API token from step 2"` are text. The known trade-off: a spaced secret made only of
+    word-plus-number chunks (`Kxqz92 Mabc47`) reads as prose."""
     odd = "".join(w for w in value.split() if not _is_prose_word(w))
     return len(odd) >= 8 and _value_is_real(odd)
 

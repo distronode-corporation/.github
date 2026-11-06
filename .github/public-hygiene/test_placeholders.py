@@ -525,5 +525,26 @@ class SeerRound3(Case):
         ])
 
 
+class SeerRound4(Case):
+    """Seer round 4 on #15: a technical name written with its number (`SHA256`, `OAuth2`)
+    is prose in a quoted value with spaces, judged on a whole word only."""
+
+    def test_technical_names_are_prose(self) -> None:
+        self.quiet([
+            'token: "Uses SHA256 with OAuth2 and Base64 encoding"',
+            'secret: "Sign with HS256, verify with RS256 and X509 certificates"',
+            'password: "hash it with sha256, then base64 it"',
+            'api_key: "Runs on Ubuntu22 with Python3 and IPv6"',
+        ])
+
+    def test_secrets_beside_or_shaped_like_them_still_fire(self) -> None:
+        self.fire([
+            J(['token: "', "Kx92 mLq7 ", 'ZtPq 88aB"']),  # no word is a technical name
+            J(['secret: "', "XK92-MQ47-", 'ZT81 is the code"']),  # a hyphenated group is judged whole
+            J(['token: "SHA256 ', "Kx92mLq7", 'ZtPq"']),  # the name drops out, the rest is a secret
+            J(['password = "', "Kx9 2mLq7", 'Zt"']),
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()
