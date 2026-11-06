@@ -226,7 +226,22 @@ PLACEHOLDER_CHARS = _c(r"[$<>{}%*]")
 PLACEHOLDER_WORDS = frozenset(
     {"password", "passwd", "pass", "secret", "changeme", "example", "redacted", "hunter2", "token", "xxxxxx"}
 )
-PLACEHOLDER_VALUE = _c(r"your|here|example|placeholder|sample|dummy|xxxx|redacted|secrets\.|vars\.|env\.", IC)
+# Placeholder words, matched as whole words of a value (`YOUR_API_KEY_HERE`,
+# `yourTokenHere`), never inside one: a real secret may contain `here` or `your`.
+PLACEHOLDER_WORDS_IN_VALUE = frozenset(
+    {"your", "here", "example", "placeholder", "sample", "dummy", "redacted", "changeme", "todo", "fixme", "insert", "replace"}
+)
+VALUE_WORD = _c(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+TEMPLATE_PREFIX = _c(r"(?:secrets|vars|env|inputs|steps|github)\.", IC)
+
+
+def _is_placeholder_value(value: str) -> bool:
+    if TEMPLATE_PREFIX.match(value) or PLACEHOLDER_CHARS.search(value):
+        return True
+    words = [w.lower() for w in VALUE_WORD.findall(value)]
+    if any(w in PLACEHOLDER_WORDS_IN_VALUE for w in words):
+        return True
+    return any(len(w) >= 4 and set(w) == {"x"} for w in words)  # `xxxx`, `XXXXXXXX`
 
 
 def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
@@ -244,7 +259,7 @@ def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
     if assignment:
         # `password: Simulator.app` is prose; a value with no digit is a word, not a secret.
         value = assignment.group(1)
-        if PLACEHOLDER_VALUE.search(value) or PLACEHOLDER_CHARS.search(value):
+        if _is_placeholder_value(value):
             return False
         return bool(re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) and len(set(value)) >= 8
     body = re.sub(r"^[A-Za-z]+[_\-]", "", found)
