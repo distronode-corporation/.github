@@ -1,0 +1,40 @@
+name: Public hygiene
+
+# This repository's own caller of the shared check that it defines, pinned like every
+# other repository's (so its pull requests never run their own copy of the checker).
+#
+# This repository is public, so its issue and pull request text is too. This runs the
+# organization's shared check on every title, description, comment and review: a finding
+# fails the run and the check keeps one comment on the thread naming the rules (never the
+# matched text). The rules and the workflow are in distronode-corporation/.github, under
+# `.github/public-hygiene/` and `.github/workflows/public-hygiene.yml`.
+#
+# Not a required check. Nothing from this repository is checked out or run.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited]
+  pull_request_review_comment:
+    types: [created, edited]
+
+permissions: {}
+
+# One run per thread at a time, so two runs never write the comment at once. Each run
+# reads the whole thread, so a queued run that is superseded loses nothing.
+concurrency:
+  group: public-hygiene-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  public-hygiene:
+    name: public hygiene
+    permissions:
+      contents: read # the checker's checkout
+      issues: write # read the thread; keep the one comment on an issue
+      pull-requests: write # read reviews; keep the one comment on a pull request
+    uses: distronode-corporation/.github/.github/workflows/public-hygiene.yml@f33d3d12f9f2f67c735968823fa5bbbe73886341 # public-hygiene branch; re-pinned to main after the merge
