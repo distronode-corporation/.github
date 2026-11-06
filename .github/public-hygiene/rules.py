@@ -43,6 +43,11 @@ Documented exceptions (the allowlist), each next to the rule it narrows:
   already cite throughout.
 - `secret-name-*`: the names every workflow uses, browser-public names, error codes.
 
+Every pattern is linear on a 64 KB body (GitHub's cap): no unbounded repeat can start at
+every position of a run and scan to its end, and adjacent whitespace quantifiers are
+possessive (written `*+`, Python 3.11 or newer). test_rules.py holds the worst shapes found by
+fuzzing to a time bound.
+
 Planted examples in test_rules.py are assembled at run time, so that this repository's
 own secret scan and dash check do not trip on them.
 """
@@ -171,7 +176,7 @@ TOKEN_PATTERNS = (
         # `a-a-a-...` chain is linear, not quadratic.
         r"(?<![\w-])(?:-{1,2})?(?:[A-Za-z0-9]+[_\-]){0,4}(?:password|passwd|secret|api[_\-]?key|access[_\-]?token|auth[_\-]?token)"
         # A key suffix (`SECRET_KEY`, `SECRET_ACCESS_KEY`) and a quoted key (`"password":`).
-        r"(?:[_\-](?:access[_\-])?key)?['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9_\-+/=.]{12,}",
+        r"(?:[_\-](?:access[_\-])?key)?['\"]?\s*+[:=]\s*+['\"]?[A-Za-z0-9_\-+/=.]{12,}",
         IC,
     ),
 )
@@ -197,7 +202,7 @@ def _token_payload_is_real(m: re.Match[str]) -> bool:
     return len(set(body)) >= 8
 
 
-ASSIGNMENT_VALUE = _c(r"[:=]\s*['\"]?([A-Za-z0-9_\-+/=.]{12,})$")
+ASSIGNMENT_VALUE = _c(r"[:=]\s*+['\"]?([A-Za-z0-9_\-+/=.]{12,})$")
 URL_PASSWORD = _c(r"://[^\s/:@]+:([^\s/@]+)@")
 PLACEHOLDER_CHARS = _c(r"[$<>{}%*]")
 PLACEHOLDER_WORDS = frozenset({"password", "passwd", "pass", "secret", "changeme", "example", "redacted", "hunter2", "token", "xxxxxx"})
@@ -224,7 +229,7 @@ SECRET_NAME_KEBAB = _c(
 COMMON_SECRET_NAMES = frozenset(
     {"GITHUB_TOKEN", "GH_TOKEN", "ACTIONS_RUNTIME_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"}
 )
-SECRET_STORE = _c(r"(?<![\w-])(?:GSM|Secret\s+Manager|secretmanager|gcloud\s+secrets)(?![\w-])")
+SECRET_STORE = _c(r"(?<![\w-])(?:GSM|Secret\s++Manager|secretmanager|gcloud\s++secrets)(?![\w-])")
 # The cluster's env Secret, by name.
 CLUSTER_ENV_SECRET = _c(r"(?<![\w-])distronode-env(?:-snapshot)?(?![\w-])", IC)
 
@@ -270,19 +275,19 @@ def _find_secret_name_list(text: str) -> Iterator[tuple[int, int]]:
 # --------------------------------------------------------------------------- credential health
 
 CREDENTIAL_HEALTH = (
-    _c(r"\bnot\s+(?:yet\s+)?(?:been\s+)?(?:verified|tested|confirmed|proven)\s+(?:in|on|against)\s+prod(?:uction)?\b", IC),
-    _c(r"\b(?:unverified|untested)\s+in\s+prod(?:uction)?\b", IC),
-    _c(r"\bexpir(?:y|ation|es)(?:\s+date)?\s+(?:is\s+|was\s+|has\s+)?(?:not|never)\s+(?:yet\s+)?(?:been\s+)?(?:checked|verified|known|confirmed)\b", IC),
-    _c(r"\bexpiry\s+(?:unknown|unchecked)\b", IC),
-    _c(r"\bverified\s*[=:]\s*false\b", IC),
+    _c(r"\bnot\s++(?:yet\s++)?(?:been\s++)?(?:verified|tested|confirmed|proven)\s++(?:in|on|against)\s++prod(?:uction)?\b", IC),
+    _c(r"\b(?:unverified|untested)\s++in\s++prod(?:uction)?\b", IC),
+    _c(r"\bexpir(?:y|ation|es)(?:\s++date)?\s++(?:is\s++|was\s++|has\s++)?(?:not|never)\s++(?:yet\s++)?(?:been\s++)?(?:checked|verified|known|confirmed)\b", IC),
+    _c(r"\bexpiry\s++(?:unknown|unchecked)\b", IC),
+    _c(r"\bverified\s*+[=:]\s*+false\b", IC),
 )
 
 # Rotation wording, which also describes images and screens, so it counts only with a
 # credential word within CREDENTIAL_WINDOW characters either side.
 ROTATION = (
     _c(r"\bun-?rotated\b", IC),
-    _c(r"\b(?:not|never)\s+(?:yet\s+)?(?:been\s+)?rotated\b", IC),
-    _c(r"\brotation\s+(?:is\s+)?(?:overdue|pending|due|outstanding|not\s+done)\b", IC),
+    _c(r"\b(?:not|never)\s++(?:yet\s++)?(?:been\s++)?rotated\b", IC),
+    _c(r"\brotation\s++(?:is\s++)?(?:overdue|pending|due|outstanding|not\s++done)\b", IC),
 )
 CREDENTIAL_WORD = _c(r"\b(?:key|keys|secret|secrets|token|tokens|password|passwords|credential|credentials|cert|certificate|pat)\b", IC)
 CREDENTIAL_WINDOW = 60
@@ -302,7 +307,7 @@ def _find_credential_health(text: str) -> Iterator[tuple[int, int]]:
 # --------------------------------------------------------------------------- IAM and WIF
 
 IAM_WIF = (
-    _c(r"\bgcloud\s+iam\b", IC),
+    _c(r"\bgcloud\s++iam\b", IC),
     _c(r"\b(?:add|remove|set|get)-iam-policy(?:-binding)?\b", IC),
     _c(r"\battribute[._-]?condition\b", IC),
     _c(r"--attribute-mapping\b", IC),
@@ -318,13 +323,13 @@ IAM_WIF = (
 # --------------------------------------------------------------------------- operator commands
 
 OPERATOR_COMMAND = (
-    _c(r"\bgcloud\s+(?:alpha\s+|beta\s+)?[a-z][a-z\-]+\s+[a-z][a-z\-]+", IC),
-    _c(r"\baws\s+(?:iam|sts|ssm|secretsmanager|kms|organizations|ec2|ecr|sso)\s+[a-z][a-z\-]+"),
-    _c(r"\bkubectl\s+(?:(?:-n|--namespace|--context)[ =]\S+\s+)*(?:set|patch|apply|edit|create|delete|rollout|scale|annotate|label|replace|exec|cp|drain|cordon)\b", IC),
+    _c(r"\bgcloud\s++(?:alpha\s++|beta\s++)?[a-z][a-z\-]+\s++[a-z][a-z\-]+", IC),
+    _c(r"\baws\s++(?:iam|sts|ssm|secretsmanager|kms|organizations|ec2|ecr|sso)\s++[a-z][a-z\-]+"),
+    _c(r"\bkubectl\s++(?:(?:-n|--namespace|--context)[ =]\S++\s++)*(?:set|patch|apply|edit|create|delete|rollout|scale|annotate|label|replace|exec|cp|drain|cordon)\b", IC),
     _c(r"\benvFrom\b"),
-    _c(r"\bgh\s+secret\s+(?:set|delete)\b", IC),
-    _c(r"\bglab\s+variable\s+(?:set|update|delete)\b", IC),
-    _c(r"\bwrangler\s+secret\s+(?:put|delete|bulk)\b", IC),
+    _c(r"\bgh\s++secret\s++(?:set|delete)\b", IC),
+    _c(r"\bglab\s++variable\s++(?:set|update|delete)\b", IC),
+    _c(r"\bwrangler\s++secret\s++(?:put|delete|bulk)\b", IC),
 )
 
 # --------------------------------------------------------------------------- email
@@ -391,8 +396,8 @@ def _find_private_path(text: str) -> Iterator[tuple[int, int]]:
 # --------------------------------------------------------------------------- machine names
 
 MACHINE_NAME = (
-    _c(r"\b(?:ThinkPad|iMac|Latitude)(?:'s)?\s+(?:manager|session|worker|box|runner|handoff|agent|clone|checkout|worktree|lane)s?\b"),
-    _c(r"\b(?:on|from|to|via|by|in|at)\s+the\s+(?:ThinkPad|iMac|Latitude)\b"),
+    _c(r"\b(?:ThinkPad|iMac|Latitude)(?:'s)?\s++(?:manager|session|worker|box|runner|handoff|agent|clone|checkout|worktree|lane)s?\b"),
+    _c(r"\b(?:on|from|to|via|by|in|at)\s++the\s++(?:ThinkPad|iMac|Latitude)\b"),
     _c(r"(?<![\w-])distronode-(?:thinkpad|imac|latitude)(?![\w-])", IC),
     _c(r"(?<![\w-])distronode-com-c\d+(?![\w-])", IC),
 )
@@ -402,16 +407,16 @@ MACHINE_NAME = (
 IPV4 = _c(r"(?<![\w.])((?:\d{1,3}\.){3}\d{1,3})(/\d{1,2})?(?![\w]|\.\d)")
 IPV6 = _c(r"(?<![\w:])((?:[0-9a-fA-F]{1,4}:){1,7}(?::|(?::[0-9a-fA-F]{1,4}){1,6}|[0-9a-fA-F]{1,4}))(/\d{1,3})?(?![\w:])")
 VERSION_CONTEXT = _c(
-    r"(?:\bv|\bversion\s*:?\s*|\bver\.?\s*|\brelease\s+|\bbuild\s+|\bmsix\s+|\bpackage\s+|\bpolicy\s+|\bsection\s+|"
+    r"(?:\bv|\bversion\s*+:?\s*+|\bver\.?\s*+|\brelease\s++|\bbuild\s++|\bmsix\s++|\bpackage\s++|\bpolicy\s++|\bsection\s++|"
     # Version operators only: a bare `@` or `=` is also how a host is written
     # (`user@host`, `HOST=addr`, `--server=addr`).
-    r"(?:==|>=|<=|~=|!=|\^|~)\s*|\bbump(?:s|ed)?\s+)$",
+    r"(?:==|>=|<=|~=|!=|\^|~)\s*+|\bbump(?:s|ed)?\s++)$",
     IC,
 )
 # An arrow from a two- or three-part version (`2.0.6 \u2192 2.0.6.1`, `1.2 -> 1.2.0.1`): an
 # upgrade, not a hop to a host. A four-part quad before the arrow is an address itself
 # (`127.0.0.1 -> addr`), so `LB -> addr` and `addr -> addr` still count.
-VERSION_ARROW = _c(r"(?<![\d.])\d+(?:\.\d+){1,2}\s*(?:->|\u2192)\s*$")
+VERSION_ARROW = _c(r"(?<![\d.])\d+(?:\.\d+){1,2}\s*+(?:->|\u2192)\s*+$")
 VERSION_SUFFIX = _c(r"\+[0-9A-Za-z]|-(?:alpha|beta|rc|pre|preview|dev|snapshot|nightly)\b", IC)
 DOC_NETS = tuple(
     ipaddress.ip_network(n)
@@ -494,13 +499,13 @@ def _find_private_gitlab(text: str) -> Iterator[tuple[int, int]]:
 
 
 PRIVATE_REFERENCE = (
-    _c(r"\bgitlab\s*(?:issue|mr|merge\s+request|work\s+item|epic)?\s*[#!]\s?\d+", IC),
-    _c(r"\b(?:MR|merge\s+request)\s*!\d+", IC),
-    _c(r"\bnote\s+(?:id\s+)?#?\d{8,}\b", IC),
+    _c(r"\bgitlab\s*+(?:issue|mr|merge\s++request|work\s++item|epic)?\s*+[#!]\s?\d+", IC),
+    _c(r"\b(?:MR|merge\s++request)\s*+!\d+", IC),
+    _c(r"\bnote\s++(?:id\s++)?#?\d{8,}\b", IC),
     _c(r"\bdecisions[\s\-]log\b", IC),
     _c(r"(?<![\w-])distronode-com[#!]\d+"),
     _c(r"(?<![\w-])distronode-corporation/distronode-com(?![\w-])"),
-    _c(r"\bmonorepo(?:'s)?\s+(?:commit|sha|branch|main|MR|merge\s+request|pipeline|job)\b", IC),
+    _c(r"\bmonorepo(?:'s)?\s++(?:commit|sha|branch|main|MR|merge\s++request|pipeline|job)\b", IC),
 )
 
 # --------------------------------------------------------------------------- cloud accounts and resources
@@ -509,8 +514,8 @@ CLOUD_ACCOUNT_ID = (
     _c(r"\barn:aws[\w\-]*:[\w\-]*:[\w\-]*:\d{12}:"),
     _c(r"\b\d{12}\.dkr\.ecr\."),
     _c(r"(?<![\w/])projects/\d{6,}\b"),
-    _c(r"\b(?:aws|gcp|google\s+cloud|new\s+relic|sentry|stripe|cloudflare|twilio|telnyx)\b[^\n]{0,30}?\b(?:account|project|org(?:anization)?)(?:\s+(?:id|number|no\.?))?\s*[:#=]?\s*\d{6,}\b", IC),
-    _c(r"\b(?:project|account)\s+(?:id|number|no\.?)\s*[:#=]?\s*\d{6,}\b", IC),
+    _c(r"\b(?:aws|gcp|google\s++cloud|new\s++relic|sentry|stripe|cloudflare|twilio|telnyx)\b[^\n]{0,30}?\b(?:account|project|org(?:anization)?)(?:\s++(?:id|number|no\.?))?\s*+[:#=]?\s*+\d{6,}\b", IC),
+    _c(r"\b(?:project|account)\s++(?:id|number|no\.?)\s*+[:#=]?\s*+\d{6,}\b", IC),
     _c(r"\bproject\b[^\n]{0,40}?\bnumber\b\W{0,3}\d{6,}\b", IC),
     _c(r"(?<![\w.\-/])\d{4}-\d{4}-\d{4}(?![\w\-])"),
     _c(r"\b\d{6,}-compute@developer\.gserviceaccount\.com\b", IC),

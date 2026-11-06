@@ -346,8 +346,11 @@ class RuleCases(unittest.TestCase):
         # quadratic (minutes for one body); every one must now take well under a second.
         import time
 
-        for unit in ("a-", "a.", ".", "eyJa.", "A_", "a@", "a://b@", "1.", "x@y."):
-            text = (unit * (65536 // len(unit) + 1))[:65536]
+        shapes = [(unit * (65536 // len(unit) + 1))[:65536] for unit in ("a-", "a.", ".", "eyJa.", "A_", "a@", "a://b@", "1.", "x@y.")]
+        # A keyword, then a long run of whitespace: adjacent `\s*` once backtracked.
+        shapes += [(kw + ws * 65536)[:65536] for kw in ("gitlab", "project number", "gcloud iam") for ws in (" ", "\n")]
+        for text in shapes:
+            unit = text[:12]
             start = time.perf_counter()
             rules.scan(text)
             self.assertLess(time.perf_counter() - start, 3.0, unit)
