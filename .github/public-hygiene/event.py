@@ -30,6 +30,7 @@ generated from public upstream content.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -60,7 +61,12 @@ class Api(Protocol):
 
 
 class ApiError(Exception):
-    """An API failure, described by method, path and status only."""
+    """An API failure, described by method, path and status only. `status` is the HTTP
+    status when there was one, else None."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class RestApi:
@@ -93,10 +99,14 @@ class RestApi:
                 raw = resp.read()
                 link = resp.headers.get("Link", "")
         except urllib.error.HTTPError as e:
-            raise ApiError(f"{method} {path}: HTTP {e.code}") from None
-        except (urllib.error.URLError, TimeoutError) as e:
+            raise ApiError(f"{method} {path}: HTTP {e.code}", e.code) from None
+        except (OSError, http.client.HTTPException) as e:
+            # URLError, timeouts, resets mid-read and malformed responses alike.
             raise ApiError(f"{method} {path}: {type(e).__name__}") from None
-        return (json.loads(raw) if raw else None), link
+        try:
+            return (json.loads(raw) if raw else None), link
+        except ValueError:
+            raise ApiError(f"{method} {path}: the response is not JSON") from None
 
     def get(self, path: str) -> Any:
         return self._request("GET", self.base + path)[0]

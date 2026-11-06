@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import http.client
 import io
 import json
 import sys
@@ -163,10 +164,20 @@ class Sweep(unittest.TestCase):
         body = gl.notes[0][1]["body"]
         self.assertIn("octo/noissues: pull requests", body)
         self.assertIn(f"{HTML}/pull/7", body)  # the next repository was still read
-        self.assertIn("1 part(s) could not be read", log)
+        self.assertIn("2 part(s) could not be read", log)
+        self.assertIn("octo/noissues: issues\n", body + "\n")
         self.assertNotIn("noissues", log)
 
-    def test_issues_turned_off_falls_back_to_the_pull_request_listing(self) -> None:
+    issues_status: int | None = 410
+
+    def test_a_transient_issues_failure_is_reported_not_hidden(self) -> None:
+        self.issues_status = 502
+        try:
+            self.test_issues_turned_off_falls_back_to_the_pull_request_listing(expect_status=1)
+        finally:
+            self.issues_status = 410
+
+    def test_issues_turned_off_falls_back_to_the_pull_request_listing(self, expect_status: int = 0) -> None:
         gh = FakeGitHub()
         pulls = [
             {"number": 3, "title": "New", "body": f"from {BAD_IP}", "updated_at": RECENT, "user": user(), "html_url": "https://github.com/octo/prs/pull/3"},
@@ -175,7 +186,7 @@ class Sweep(unittest.TestCase):
 
         def get_all(path: str) -> list[Any]:
             if path.startswith("/repos/octo/prs/issues?"):
-                raise event.ApiError("GET /repos/octo/prs/issues: HTTP 410")
+                raise event.ApiError("GET /repos/octo/prs/issues: HTTP 410", self.issues_status)
             if path == "/repos/octo/prs/pulls?state=all&sort=updated&direction=desc":
                 return pulls
             if path == "/orgs/octo/repos?type=public":
@@ -185,10 +196,11 @@ class Sweep(unittest.TestCase):
         gh.get_all = get_all  # type: ignore[method-assign]
         gl = FakeGitLab()
         status, _ = run(ENV, gh, gl)
-        self.assertEqual(status, 0)
+        self.assertEqual(status, expect_status)
         body = gl.notes[0][1]["body"]
         self.assertIn("pull request: https://github.com/octo/prs/pull/3", body)
         self.assertNotIn("/pull/2", body)
+        self.assertEqual("octo/prs: issues" in body, expect_status == 1)
 
     def test_ids_must_be_numeric(self) -> None:
         with self.assertRaises(event.ApiError):
@@ -261,10 +273,25 @@ class RestApiTests(unittest.TestCase):
             with self.assertRaises(event.ApiError) as ctx:
                 api.post("/x", {"body": BAD_IP})
         self.assertEqual(str(ctx.exception), "POST /x: HTTP 403")
+        self.assertEqual(ctx.exception.status, 403)
         with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("down")):
             with self.assertRaises(event.ApiError) as ctx:
                 api.get("/y?q=1")
         self.assertEqual(str(ctx.exception), "GET /y: URLError")
+
+    def test_low_level_failures_become_api_errors(self) -> None:
+        api = event.RestApi("https://api.example.org", "tok")
+        for exc in (ConnectionResetError(), TimeoutError(), http.client.IncompleteRead(b"x")):
+            with mock.patch("urllib.request.urlopen", side_effect=exc):
+                with self.assertRaises(event.ApiError) as ctx:
+                    api.get("/z")
+            self.assertIsNone(ctx.exception.status)
+        bad = FakeResponse(None)
+        bad.raw = b"<html>" + BAD_IP.encode()
+        with mock.patch("urllib.request.urlopen", lambda req, timeout: bad):
+            with self.assertRaises(event.ApiError) as ctx:
+                api.get("/z")
+        self.assertEqual(str(ctx.exception), "GET /z: the response is not JSON")
 
     def test_gitlab_auth_header_and_json_bodies(self) -> None:
         api = event.RestApi("https://gitlab.example.org/api/v4", "glt", gitlab=True)
