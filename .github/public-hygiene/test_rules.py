@@ -232,6 +232,7 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "findings in `~/.cache/tool-x/qa/notes.md`",
             "keys in ~/.config/mcp/settings.env",
             "keys in /root/.config/gcloud/",
+            "the key ~/.ssh/district_deploy",  # the app-cache exception is for the cache only
             "per monorepo `docs/some_contract.md`",
             "see the monorepo's infra/README.md",
         ],
