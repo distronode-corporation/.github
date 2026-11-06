@@ -702,7 +702,8 @@ CANARY = load_canary()
 # Candidate tokens. Each pattern has a lookbehind that refuses a start inside a run of its
 # own characters, so a long run is matched once, not once per position.
 TOKEN_RE = _c(r"(?<![a-z0-9_.\-])[a-z0-9_](?:[a-z0-9_.\-]{0,200}[a-z0-9_])?", IC)
-PATH_RE = _c(r"(?<![a-z0-9_.\-~/])(?:~|[a-z0-9_.\-]{1,100})(?:/[a-z0-9_.\-]{1,100}){1,20}", IC)
+# A path, relative, absolute or inside a URL (`scheme://host/a/b`); each part is bounded.
+PATH_RE = _c(r"(?<![a-z0-9_.\-~/])(?:[a-z][a-z0-9+.\-]{0,20}://[^/\s]{1,253})?/?(?:~|[a-z0-9_.\-]{1,100})(?:/[a-z0-9_.\-]{1,100}){1,20}", IC)
 WORD_RE = _c(r"(?<![a-z0-9'])[a-z0-9]{1,60}(?:'s)?(?![a-z0-9])", IC)
 REF_RE = _c(r"(?<![a-z0-9_.\-])([a-z0-9][a-z0-9_.\-]{0,60})[#!]\d", IC)
 DIGITS = re.compile(r"\d+")
@@ -856,12 +857,18 @@ def _strip_format_chars(text: str) -> str:
     return "".join(out)
 
 
+# Typographic apostrophes (right single quotation mark, modifier letter apostrophe and
+# their kin), as macOS, iOS and word processors type them, read as the ASCII one.
+_APOSTROPHES = dict.fromkeys(map(ord, chr(0x2019) + chr(0x2018) + chr(0x02BC) + chr(0x2032) + chr(0xFF07)), "'")
+
+
 def _normalize(text: str) -> tuple[str, bool]:
     """The scanned form of `text`, and whether it was cut at MAX_SCAN_CHARS."""
     text = _strip_format_chars(text.replace("\r\n", "\n").replace("\r", "\n"))
     folded = unicodedata.normalize("NFKC", text)
     if len(folded) > 2 * len(text) + 16:
         folded = text  # an expansion attack (U+FDFA is 18 characters under NFKC)
+    folded = folded.translate(_APOSTROPHES)  # NFKC keeps typographic apostrophes
     return folded[:MAX_SCAN_CHARS], len(folded) > MAX_SCAN_CHARS
 
 

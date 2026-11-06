@@ -387,10 +387,13 @@ FAKE_TERMS = [
     ("acme-origin", "the host acme-origin-zz-test answers"),
     ("origin.acme.example", "dial origin-zz.acme.example directly"),
     ("toolbox/deploy", "see toolbox/deploy/run.sh"),
+    ("toolbox/deploy", "see /toolbox/deploy/run.sh"),
+    ("toolbox/deploy", "see https://code.example.org/toolbox/deploy/run.sh"),
     ("notes/ops_", "per notes/ops_runbook.md"),
     ("acme-com-c#", "the session acme-com-c12 owns it"),
     ("lab manager", "the lab manager reviewed it"),
     ("'s laptop9", "run it on Pat's laptop9 first"),
+    ("'s laptop9", "run it on Pat" + chr(0x2019) + "s laptop9 first"),
     ("on the laptop9", "built on the laptop9 last night"),
     ("acme-com#", "decided in acme-com#7"),
     ("9876543210", "account 9876543210 holds it"),
@@ -487,7 +490,7 @@ class InternalNames(unittest.TestCase):
 
     def test_each_term_fires_in_context(self) -> None:
         for term, text in FAKE_TERMS:
-            with self.subTest(term=term):
+            with self.subTest(term=term, text=text):
                 self.assertIn("internal-name", rules.rule_ids(text))
 
     def test_look_alikes_stay_quiet(self) -> None:
