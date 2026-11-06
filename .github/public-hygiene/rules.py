@@ -416,17 +416,32 @@ def _value_is_real(value: str) -> bool:
 
 # A word of prose: a word, a capitalized or upper-case word, or a number, or a few of them
 # joined by hyphens (`well-known`, the ranges `a-z` and `0-9`), with the punctuation prose
-# puts around it (`(a-z,`, `0-9).`).
-_PROSE_ATOM = r"(?:[A-Za-z][a-z]*+(?:'[a-z]{1,2})?|[A-Z]++|\d++)"
+# puts around it (`(a-z,`, `0-9).`). A version (`v2`, `v1.3.0`) is a word too.
+_PROSE_ATOM = r"(?:[vV]\d{1,6}+(?:\.\d{1,6}+){0,3}(?![A-Za-z])|[A-Za-z][a-z]*+(?:'[a-z]{1,2})?|[A-Z]++|\d++)"
 PROSE_WORD = _c(r"[(\[]?" + _PROSE_ATOM + r"(?:-" + _PROSE_ATOM + r"){0,4}[.,:;!?)\]]{0,2}")
+
+
+# Where a word of help text joins prose words: `8+`, `docs/v2/auth`, `key=value`.
+PROSE_JOINERS = _c(r"[/+:=&?#@*%~|]+")
+
+
+def _is_prose_word(word: str) -> bool:
+    """A prose word, a link that holds no secret (judged by _url_value_is_real), or prose
+    words joined by PROSE_JOINERS."""
+    if PROSE_WORD.fullmatch(word):
+        return True
+    bare = word.strip("()[].,:;!?'")
+    if URL_VALUE.match(bare):
+        return not _url_value_is_real(bare)
+    return all(not part or PROSE_WORD.fullmatch(part) for part in PROSE_JOINERS.split(bare))
 
 
 def _spaced_value_is_real(value: str) -> bool:
     """A quoted value with spaces in it (`"Kx9 2mLq7Zt"`) is a secret when its words that
-    are not prose (`Kx9`, `2mLq7Zt`, not `Use`, `the`, `token`, `2`) hold eight or more
-    characters and, together, pass _value_is_real: `"Minimum 8 characters"` and `"Use
-    the API token from step 2"` are text."""
-    odd = "".join(w for w in value.split() if not PROSE_WORD.fullmatch(w))
+    are not prose (`Kx9`, `2mLq7Zt`, not `Use`, `the`, `token`, `2`, `8+`, a docs link)
+    hold eight or more characters and, together, pass _value_is_real: `"Minimum 8
+    characters"` and `"Use the API token from step 2"` are text."""
+    odd = "".join(w for w in value.split() if not _is_prose_word(w))
     return len(odd) >= 8 and _value_is_real(odd)
 
 

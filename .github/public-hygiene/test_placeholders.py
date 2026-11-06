@@ -465,6 +465,9 @@ class GapsLeftBy11(Case):
             f'"password": "{s}"',
             f'clientSecret: "{s}"',
             f"DB_PASSWORD='{s}'",
+            # A link that holds a secret, or a secret with a joiner in it, is still one.
+            f'token: "see https://hooks.example.com/services/T0001/B0002/{self.V}2vR8 now"',
+            J(['password = "', "Kx9/2mLq7 ", "ZtPq+W4", '"']),
         ])
         self.quiet([
             'password: "Minimum 8 characters"',
@@ -483,6 +486,10 @@ class GapsLeftBy11(Case):
             'password: "Use letters (a-z, A-Z, 0-9) and symbols"',
             'password_hint: "Mix upper-case, lower-case and 0-9 digits."',
             '"secret": "A well-known value for end-to-end tests"',
+            # Symbols and links in help text are prose too (Seer, round 2).
+            'password_help: "Use 8+ characters, see https://docs.example.org/v2/passwords"',
+            'token: "See docs/auth/v2 or run gh auth login (key=value form)"',
+            '"api_key": "Create one at https://dashboard.vendor.org/settings/api2 first."',
             # Code between two string literals, not a quoted value (the survey's two hits).
             'f.do(t, "GET", "/v1/verify?token="+magic2, "", "")',
             'J(["password=", chr(0x131) + "nputs.", "Kx92mLq7"])',
