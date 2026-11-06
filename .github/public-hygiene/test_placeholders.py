@@ -346,5 +346,144 @@ class CodePathsStayFlagged(Case):
         ])
 
 
+class GapsLeftBy11(Case):
+    """The detection gaps #11 left: a flag and its value as two arguments, YAML block
+    scalars, Python triple-quoted strings, PHP's `define`, PowerShell's
+    `ConvertTo-SecureString ... -AsPlainText`, and quoted values with a space. Each is read
+    with the same placeholder and reference logic as an assignment."""
+
+    V = J(["Kx92m", "Lq7ZtPqW"])
+    S = J(["Kx9 2m", "Lq7 ZtPq"])
+
+    def test_a_flag_and_its_value(self) -> None:
+        v, s = self.V, self.S
+        self.fire([
+            f"--password {v}",
+            f"-password {v}",
+            f"--api-key {v}",
+            f"--db-password '{v}'",
+            f'--token "{v}"',
+            f"mysql --password {v} -h db",
+            f"--access-token\t{v}",
+            f'--client-secret "{s}"',
+        ])
+        self.quiet([
+            "--password $DB_PASSWORD",
+            '--password "$DB_PASSWORD"',
+            "--token ${{ secrets.GH_TOKEN_2 }}",
+            '--token "${{ secrets.GH_TOKEN_2 }}"',
+            '--token "$env:GH_TOKEN"',
+            "--api-key ${API_KEY_2}",
+            "--password %DB_PASSWORD%",
+            "--token $(gh auth token)",
+            "--token <your-token>",
+            "--password changeme",
+            "--password CHANGE_ME_2",
+            "--api-key YOUR_API_KEY_HERE",
+            "--password example2024",
+            "--password ****",
+            "--password PASSWORD",
+            '--password "Your password here 2"',
+            # Not this key, or not a value.
+            "--password-stdin < pw2.txt",
+            "--token-file /run/secrets/token2",
+            "--secret id=npmrc,src=$HOME/.npmrc",
+            "use the --token argument",
+            "--token  The token to use (v2)",
+        ])
+
+    def test_a_yaml_block_scalar(self) -> None:
+        v = self.V
+        self.fire([
+            f"password: |\n  {v}",
+            f"client_secret: >-\n    {v}",
+            f"DB_PASSWORD: |+\n  '{v}'",
+            f"  api_key: |2\n    {v}\n",
+            f'"token": |\n  {v}',
+        ])
+        self.quiet([
+            "password: |\n  ${{ secrets.DB_PASSWORD_2 }}",
+            "password: |\n  {{ .Values.db.password2 }}",
+            "secret: |\n  $DB_SECRET_2",
+            "password: |\n  changeme",
+            "token: |\n  <paste the token2 here>",
+            "token: >\n  The token the bot uses.",
+            f"description: |\n  {v}",  # not a key
+        ])
+
+    def test_a_python_triple_quoted_string(self) -> None:
+        v = self.V
+        self.fire([f'password = """{v}"""', f"api_key = '''{v}'''", f'TOKEN="""{v}"""'])
+        self.quiet([
+            'password = """changeme"""',
+            "api_key = '''YOUR_API_KEY_HERE'''",
+            'token = """${TOKEN_2}"""',
+            'password = """\nThe password field must be 8 characters.\n"""',
+        ])
+
+    def test_php_define(self) -> None:
+        v, s = self.V, self.S
+        self.fire([
+            f"define('DB_PASSWORD', '{v}');",
+            f'define( "AUTH_TOKEN" , "{v}" );',
+            f"define('SECRET_KEY', '{s}');",
+        ])
+        self.quiet([
+            "define( 'DB_PASSWORD', 'password_here' );",  # wp-config-sample.php
+            "define('DB_PASSWORD', 'your-db-password');",
+            "define('DB_PASSWORD', getenv('DB_PASSWORD_2'));",
+            "define('DB_PASSWORD', $_ENV['DB_PASSWORD_2']);",
+            f"define('DB_HOST', '{v}');",  # not a key
+        ])
+
+    def test_powershell_convertto_securestring(self) -> None:
+        v, s = self.V, self.S
+        self.fire([
+            f'$secret = ConvertTo-SecureString "{v}" -AsPlainText -Force',
+            f"ConvertTo-SecureString -String '{v}' -AsPlainText -Force",
+            f"ConvertTo-SecureString -AsPlainText -Force -String '{v}'",
+            f"ConvertTo-SecureString '{v}' -Force -AsPlainText",
+            f'ConvertTo-SecureString "{s}" -AsPlainText -Force',
+        ])
+        self.quiet([
+            "$pw = ConvertTo-SecureString $env:DB_PASSWORD_2 -AsPlainText -Force",
+            'ConvertTo-SecureString "$Password2" -AsPlainText -Force',
+            'ConvertTo-SecureString "$DbPassword" -AsPlainText -Force',
+            'ConvertTo-SecureString "${env:PW_2}" -AsPlainText -Force',
+            "ConvertTo-SecureString '<password>' -AsPlainText -Force",
+            "ConvertTo-SecureString 'your_pass_here' -AsPlainText -Force",
+            "ConvertTo-SecureString (Get-Content pw2.txt) -AsPlainText -Force",
+            f"ConvertTo-SecureString '{v}'",  # an encrypted standard string, not the password
+        ])
+        # A PascalCase variable is one only when its words are letters and digits end it.
+        self.fire([J(["password=$", "Kx92m", "Lq7ZtPq"])])
+
+    def test_a_quoted_value_with_a_space(self) -> None:
+        s = self.S
+        self.fire([
+            f"password = '{s}'",
+            f'"password": "{s}"',
+            f'clientSecret: "{s}"',
+            f"DB_PASSWORD='{s}'",
+        ])
+        self.quiet([
+            'password: "Minimum 8 characters"',
+            'token: "Use the API token from step 2"',
+            '"secret": "Base64 encoded value"',
+            '"password": "The password, at least 12 characters (letters and digits)."',
+            "token: \"isn't set yet, see #12\"",
+            'password: "${{ secrets.DB_PASSWORD_2 }}"',
+            "token: '{{ .Values.token2 }}'",
+            "api_key: '%(api_key)s and more'",
+            'password: "your password here"',
+            '"password": "<your password>"',
+            'password: "**** ****"',
+            'password = "Enter your password: "',
+            # Code between two string literals, not a quoted value (the survey's two hits).
+            'f.do(t, "GET", "/v1/verify?token="+magic2, "", "")',
+            'J(["password=", chr(0x131) + "nputs.", "Kx92mLq7"])',
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()
