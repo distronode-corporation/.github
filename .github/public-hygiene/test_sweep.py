@@ -4,8 +4,10 @@ public log nor the report ever holds the matched text."""
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import datetime as dt
+import re
 import http.client
 import io
 import json
@@ -28,6 +30,7 @@ OLD = "2026-10-01T10:00:00Z"
 BAD_IP = "34.120.7.9"
 BAD_REF = "GitLab #7, note 1234509876"
 HTML = "https://github.com/octo/app"
+PIN_SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
 def user(login: str = "author", kind: str = "User") -> dict[str, Any]:
@@ -78,19 +81,37 @@ class FakeGitHub:
         }
         self.graphql_numbers: list[int] = []
 
+        self.pin_status = "behind"
+        self.callers: dict[str, str | None] = {}  # repo -> caller text (None: no caller)
+        self.editors: dict[str, dict[str, Any]] = {}  # node id -> editor
+
     def get(self, path: str) -> Any:
-        assert path == "/repos/octo/.github/commits?per_page=1", path
-        return [{"commit": {"committer": {"date": self.commit_date}}}]
+        if "/collaborators/" in path:
+            return {"permission": "read"}
+        if path == "/repos/octo/.github/commits?per_page=1":
+            return [{"commit": {"committer": {"date": self.commit_date}}}]
+        if path == "/repos/octo/.github":
+            return {"default_branch": "main"}
+        if path.startswith("/repos/octo/.github/compare/main..."):
+            return {"status": self.pin_status}
+        m = re.fullmatch(r"/repos/(octo/[\w.\-]+)/contents/\.github/workflows/[\w.\-]+\.yml", path)
+        assert m, path
+        text = self.callers.get(m.group(1), f"uses: octo/.github/.github/workflows/public-hygiene.yml@{PIN_SHA} # x")
+        if text is None:
+            raise event.ApiError("GET x: HTTP 404", 404)
+        return {"content": base64.b64encode(text.encode()).decode()}
 
     def get_all(self, path: str, max_pages: int = event.MAX_PAGES) -> list[Any]:
         self.paths.append(path)
         return self.data[path]
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        if "nodes(ids" in query:
+            return {"nodes": [{"id": i, "editor": self.editors[i]} for i in variables["ids"] if i in self.editors]}
         if "issueOrPullRequest" in query:
             self.graphql_numbers.append(variables["number"])
             return {"repository": {"issueOrPullRequest": self.edits.get(variables["number"], {})}}
-        return {"repository": {"discussions": {"nodes": self.discussions}}}
+        return {"repository": {"discussions": {"pageInfo": {"hasNextPage": getattr(self, "discussions_more", False)}, "nodes": self.discussions}}}
 
     def post(self, path: str, body: dict[str, Any]) -> Any:
         raise AssertionError("the sweep never writes to GitHub")
@@ -143,7 +164,7 @@ class Sweep(unittest.TestCase):
         self.assertIn("releases/tag/v0", body)  # releases are read in full too
         self.assertIn(f"1 earlier revision(s) of a issue: {HTML}/issues/9", body)
         self.assertNotIn("revision(s) of a pull request: " + f"{HTML}/pull/8", body)
-        self.assertNotIn(8, gh.graphql_numbers)
+        self.assertIn(8, gh.graphql_numbers)  # read, to see who last edited it
         self.assertIn("discussioncomment-2", body)  # a reply in a recent discussion
         self.assertNotIn("discussions/3", body)  # an old discussion
         self.assertNotIn("/pull/8", body)  # Dependabot
@@ -164,6 +185,67 @@ class Sweep(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("turns its schedule off at 60", gl.notes[0][1]["body"])
         self.assertIn("No commit for 69 days", log)
+
+    def test_a_caller_pin_off_main_is_reported(self) -> None:
+        # F1: the sweep runs from main's code, so an impostor pin cannot vouch for itself.
+        gh, gl = FakeGitHub(), FakeGitLab()
+        gh.pin_status = "diverged"
+        status, _ = run(ENV, gh, gl)
+        self.assertEqual(status, 1)
+        self.assertIn("octo/app: caller pin", gl.notes[0][1]["body"])
+        gh, gl = FakeGitHub(), FakeGitLab()
+        gh.callers["octo/app"] = None
+        run(ENV, gh, gl)
+        self.assertIn("octo/app: caller pin (no caller workflow)", gl.notes[0][1]["body"])
+        gh, gl = FakeGitHub(), FakeGitLab()
+        gh.callers["octo/app"] = "uses: octo/.github/.github/workflows/public-hygiene.yml@main"
+        run(ENV, gh, gl)
+        self.assertIn("octo/app: caller pin (the caller pins no commit)", gl.notes[0][1]["body"])
+
+    def test_more_revisions_than_read_is_unreadable(self) -> None:
+        # F5
+        gh = FakeGitHub()
+        gh.edits[9] = {"body": "clean", "userContentEdits": {"totalCount": 31, "nodes": [{"diff": "clean"}] * 30}}
+        gl = FakeGitLab()
+        status, _ = run(ENV, gh, gl)
+        self.assertEqual(status, 1)
+        self.assertIn("octo/app: revisions of #9 (more than 30)", gl.notes[0][1]["body"])
+
+    def test_more_discussions_comments_or_replies_than_read_is_unreadable(self) -> None:
+        # F5
+        gh = FakeGitHub()
+        gh.discussions_more = True
+        gh.discussions[0]["number"] = 4
+        gh.discussions[0]["comments"]["pageInfo"] = {"hasNextPage": True}
+        gh.discussions[0]["comments"]["nodes"][0]["replies"]["totalCount"] = 60
+        gl = FakeGitLab()
+        status, _ = run(ENV, gh, gl)
+        self.assertEqual(status, 1)
+        body = gl.notes[0][1]["body"]
+        self.assertIn("octo/app: comments of discussion #4", body)
+        self.assertIn("octo/app: replies in discussion #4", body)
+
+    def test_a_person_edit_to_a_bot_comment_is_checked(self) -> None:
+        # F3 in the sweep.
+        gh = FakeGitHub()
+        bot_comment = {"node_id": "IC_77", "body": f"from {BAD_IP}", "user": user("dependabot[bot]", "Bot"), "html_url": f"{HTML}/pull/8#issuecomment-77"}
+        gh.data["/repos/octo/app/issues/comments?since=2026-11-01T07:00:00Z"].append(bot_comment)
+        gl = FakeGitLab()
+        run(ENV, gh, gl)
+        self.assertNotIn("issuecomment-77", gl.notes[0][1]["body"])
+        gh.editors["IC_77"] = {"login": "pat", "__typename": "User"}
+        gl = FakeGitLab()
+        run(ENV, gh, gl)
+        self.assertIn("issuecomment-77", gl.notes[0][1]["body"])
+
+    def test_a_text_too_long_to_check_is_unreadable(self) -> None:
+        # F4 in the sweep.
+        gh = FakeGitHub()
+        gh.data["/repos/octo/app/releases"].append({"name": "v2", "body": "x " * 80_000, "author": user(), "html_url": f"{HTML}/releases/tag/v2"})
+        gl = FakeGitLab()
+        status, _ = run(ENV, gh, gl)
+        self.assertEqual(status, 1)
+        self.assertIn("a release too long to check in full", gl.notes[0][1]["body"])
 
     def test_bad_sweep_days(self) -> None:
         for value in ("x", "0", "999", "-3"):
@@ -309,7 +391,8 @@ class RestApiTests(unittest.TestCase):
             return pages[len(seen) - 1]
 
         with mock.patch.object(event.OPENER, "open", fake_urlopen):
-            self.assertEqual(api.get_all("/x"), [1, 2, 3])
+            with self.assertRaises(event.ApiError):  # never taken as a complete list
+                api.get_all("/x")
         self.assertEqual(len(seen), 2)
         self.assertEqual(seen[0].get_header("Authorization"), "Bearer tok")
         self.assertTrue(seen[0].full_url.endswith("/x?per_page=100"))

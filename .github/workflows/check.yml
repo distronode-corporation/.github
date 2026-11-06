@@ -7,9 +7,10 @@ name: Check
 # - `gitleaks`: secrets anywhere in the history, not just the tip.
 # - `public-hygiene-rules`: the unit tests of the shared public hygiene check
 #   (`.github/public-hygiene/`), which every public repository calls.
+# - `caller-pin-current`: this repository's own caller pins the checker in this tree.
 #
 # The first three are required checks in the default branch's ruleset, so a pull request
-# cannot merge until they pass. `public-hygiene-rules` is not (yet) required.
+# cannot merge until they pass. The other two are not (yet) required.
 on:
   push:
     branches: [main]
@@ -98,6 +99,33 @@ jobs:
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
           "$(go env GOPATH)/bin/gitleaks" git --no-banner --redact -v --log-opts="HEAD" .
+
+  # This repository's own caller (public-text.yml) pins a commit of this repository. It
+  # must pin the checker as it is in this tree, or this repository's threads run an
+  # older checker: the pinned commit's checker files must equal HEAD's.
+  caller-pin-current:
+    name: caller-pin-current
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the pinned commit must be present to compare with
+
+      - name: The caller pins the checker in this tree
+        run: |
+          set -euo pipefail
+          pin=$(grep -oP 'public-hygiene\.yml@\K[0-9a-f]{40}' .github/workflows/public-text.yml)
+          if ! git cat-file -e "$pin^{commit}" 2>/dev/null; then
+            echo "::error::public-text.yml pins $pin, which is not in this repository's history."
+            exit 1
+          fi
+          if ! git diff --quiet "$pin" HEAD -- .github/public-hygiene .github/workflows/public-hygiene.yml; then
+            echo "::error::public-text.yml pins $pin, whose checker differs from this tree. Re-pin it."
+            exit 1
+          fi
+          echo "public-text.yml pins the checker in this tree."
 
   public-hygiene-rules:
     name: public-hygiene-rules

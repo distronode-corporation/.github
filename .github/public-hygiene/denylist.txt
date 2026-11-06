@@ -1,6 +1,7 @@
 # Keyed hashes (rules.term_hash: HMAC-SHA256, truncated) of the organization's own terms.
 # The plain list and the key (the PUBLIC_HYGIENE_DENYLIST_KEY secret) are kept outside this repository.
-# Regenerate: python3 rules.py --hash-terms <plain list> --key-file <key file> | sort -u
+# Regenerate: python3 rules.py --hash-terms <plain list> --key-file <key file> (canary line first, then the terms, sorted)
+canary:72da7bc532566120e97c
 00282a3670222fb0a543
 023f9927e678fb866766
 02e1383fc29b669900f1

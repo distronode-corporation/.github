@@ -48,6 +48,9 @@ class FakeApi:
         self.review_comments: list[dict[str, Any]] = parts.get("review_comments", [])
         self.commits: list[dict[str, Any]] = parts.get("commits", [])
         self.discussion: dict[str, Any] | None = parts.get("discussion")
+        self.pr_commits: int | None = parts.get("pr_commits")
+        self.permissions: dict[str, str] = parts.get("permissions", {})
+        self.annotations: list[dict[str, Any]] = parts.get("annotations", [])
         self.fail_reads = parts.get("fail_reads", False)
         self.fail_writes = parts.get("fail_writes", False)
         self.posts: list[tuple[str, dict[str, Any]]] = []
@@ -60,6 +63,13 @@ class FakeApi:
 
     def get(self, path: str) -> Any:
         self._check_read()
+        if path.startswith(f"/repos/{REPO}/collaborators/"):
+            login = path.split("/")[-2]
+            if self.permissions.get(login) == "error":
+                raise event.ApiError("GET x: HTTP 403", 403)
+            return {"permission": self.permissions.get(login, "read")}
+        if path == f"/repos/{REPO}/pulls/{self.number}":
+            return {"commits": len(self.commits) if self.pr_commits is None else self.pr_commits}
         assert path == f"/repos/{REPO}/issues/{self.number}", path
         return self.issue
 
@@ -92,6 +102,8 @@ class FakeApi:
             self.mutations.append({"query": query, **variables})
             return {}
         self._check_read()
+        if "nodes(ids" in query:
+            return {"nodes": [n for n in self.annotations if n.get("id") in variables["ids"]]}
         return {"repository": {"discussion": self.discussion}}
 
 
@@ -262,6 +274,61 @@ class PullRequestEvents(Runner):
         self.assertEqual(status, 1)
         self.assertEqual(log.count("Finding in a review comment"), 1)
 
+    def test_a_person_edit_to_a_skipped_bot_text_stays_red(self) -> None:
+        # F3: the first run sees the edit in the payload; the next sees it as the last editor.
+        bot = user("dependabot[bot]", "Bot")
+        issue = {"id": 1, "node_id": "PR_1", "title": "Bump", "body": f"at {BAD_IP}", "user": bot, "author_association": "NONE", "html_url": f"{HTML}/pull/7", "pull_request": {}}
+        editor = [{"id": "PR_1", "editor": {"login": "someone", "__typename": "User"}}]
+        api = FakeApi(issue=dict(issue), annotations=editor)
+        status, _ = self.run_event("pull_request", {"action": "edited", "pull_request": dict(issue, number=7), "sender": user("someone")}, api)
+        self.assertEqual(status, 1)
+        later = FakeApi(issue=dict(issue), comments=[own_comment(55, api.posts[0][1]["body"])], annotations=editor)
+        status, _ = self.run_event("pull_request", {"action": "synchronize", "pull_request": dict(issue, number=7), "sender": bot}, later)
+        self.assertEqual(status, 1)
+        self.assertEqual(later.patches, [])  # never "resolved"
+        # Without a person's edit it stays skipped.
+        status, _ = self.run_event("pull_request", {"action": "synchronize", "pull_request": dict(issue, number=7), "sender": bot}, FakeApi(issue=dict(issue)))
+        self.assertEqual(status, 0)
+
+    def test_a_hidden_review_comment_is_skipped(self) -> None:
+        # F8: REST shows `minimized` on issue comments only; the rest come from GraphQL.
+        hidden = {"id": 31, "node_id": "RC_31", "body": f"from {BAD_IP}", "user": user(), "author_association": "MEMBER", "html_url": f"{HTML}/pull/7#discussion_r31"}
+        api = FakeApi(review_comments=[hidden], annotations=[{"id": "RC_31", "isMinimized": True}])
+        status, _ = self.run_event("pull_request", pr_payload(), api)
+        self.assertEqual(status, 0)
+        status, _ = self.run_event("pull_request", pr_payload(), FakeApi(review_comments=[hidden]))
+        self.assertEqual(status, 1)
+
+    def test_more_commits_than_listed_fails_closed(self) -> None:
+        # F6
+        commits = [{"sha": "a1", "html_url": f"{HTML}/commit/a1", "author": user(), "commit": {"message": "clean", "author": {"email": "dev@example.org"}, "committer": {"email": "noreply@github.com"}}}]
+        status, log = self.run_event("pull_request", pr_payload(), FakeApi(commits=commits, pr_commits=300))
+        self.assertEqual(status, 2)
+        self.assertIn("300 commits, 1 listed", log)
+
+    def test_a_truncated_text_fails_closed(self) -> None:
+        # F4
+        msg = "x " * 75_001 + "from 10.20.30.40"
+        commits = [{"sha": "a1", "html_url": f"{HTML}/commit/a1", "author": user(), "commit": {"message": msg, "author": {"email": "dev@example.org"}, "committer": {"email": "noreply@github.com"}}}]
+        status, log = self.run_event("pull_request", pr_payload(), FakeApi(commits=commits))
+        self.assertIn("only the start was checked", log)
+        self.assertEqual(status, 2)
+
+    def test_a_review_bot_pull_request_is_checked(self) -> None:
+        # F9: Copilot's own pull request is checked; its review comments are not.
+        payload = pr_payload(f"at {BAD_IP}", login="Copilot", kind="Bot", action="opened")
+        status, _ = self.run_event("pull_request", payload, FakeApi())
+        self.assertEqual(status, 1)
+
+    def test_a_private_member_is_not_mistaken_for_an_outsider(self) -> None:
+        # To a viewer without the membership, a private member reads CONTRIBUTOR; the
+        # permission lookup decides, and any doubt counts as inside.
+        member = {"id": 9, "node_id": "IC_9", "body": f"deployed from {BAD_IP}", "user": user("pat"), "author_association": "CONTRIBUTOR", "html_url": f"{HTML}/pull/7#issuecomment-9"}
+        for permission, status_wanted in (("write", 1), ("admin", 1), ("error", 1), ("read", 0)):
+            api = FakeApi(comments=[dict(member)], permissions={"pat": permission})
+            status, _ = self.run_event("pull_request", pr_payload(), api)
+            self.assertEqual(status, status_wanted, permission)
+
     def test_a_hidden_comment_is_skipped(self) -> None:
         hidden = {"id": 9, "node_id": "IC_9", "body": f"from {BAD_IP}", "minimized": {"reason": "spam"}, "user": user(), "html_url": f"{HTML}/pull/7#issuecomment-9"}
         status, _ = self.run_event("pull_request", pr_payload(), FakeApi(comments=[hidden]))
@@ -426,13 +493,20 @@ class DiscussionAndReleaseEvents(Runner):
 
 
 class Plumbing(Runner):
+    def test_a_wrong_key_says_so_too(self) -> None:
+        # F12: a key the denylist was not built with fails the canary.
+        with mock.patch.object(event.rules, "DENYLIST_KEY", bytes(32)):
+            self.run_event("pull_request", pr_payload(), FakeApi())
+        self.assertIn("internal-name rule did not run", self.summary.read_text())
+
     def test_a_run_without_the_key_says_so_and_checks_everything_else(self) -> None:
         with mock.patch.object(event.rules, "DENYLIST_KEY", b""):
             status, log = self.run_event("pull_request", pr_payload(f"at {BAD_IP}"), FakeApi())
         self.assertEqual(status, 1)  # the other rules still ran
         self.assertIn("internal-name rule did not run", self.summary.read_text())
         self.summary.unlink()
-        with mock.patch.object(event.rules, "DENYLIST_KEY", bytes(range(32))):
+        key = bytes(range(32))
+        with mock.patch.object(event.rules, "DENYLIST_KEY", key), mock.patch.object(event.rules, "CANARY", event.rules.term_hash(event.rules.CANARY_TERM, key)):
             self.run_event("pull_request", pr_payload(), FakeApi())
         self.assertNotIn("did not run", self.summary.read_text())
 

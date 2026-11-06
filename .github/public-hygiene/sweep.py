@@ -32,6 +32,7 @@ shows counts only, never an item's URL. Reviews and releases are read in full ea
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import os
 import re
@@ -43,8 +44,9 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import pin  # noqa: E402
 import rules  # noqa: E402
-from event import Api, ApiError, RestApi, _assoc, _hidden, _user  # noqa: E402
+from event import Api, ApiError, AuthorGate, RestApi, _assoc, _hidden, _user  # noqa: E402
 
 # GitHub turns a public repository's schedules off after 60 days without activity.
 INACTIVE_WARNING_DAYS = 45
@@ -54,8 +56,8 @@ EDITS_QUERY = """
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issueOrPullRequest(number: $number) {
-      ... on Issue { body userContentEdits(first: 30) { totalCount nodes { diff } } }
-      ... on PullRequest { body userContentEdits(first: 30) { totalCount nodes { diff } } }
+      ... on Issue { body editor { login __typename } userContentEdits(first: 30) { totalCount nodes { diff } } }
+      ... on PullRequest { body editor { login __typename } userContentEdits(first: 30) { totalCount nodes { diff } } }
     }
   }
 }
@@ -65,12 +67,17 @@ DISCUSSIONS_QUERY = """
 query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     discussions(first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage }
       nodes {
-        title body url updatedAt authorAssociation author { login __typename }
+        number title body url updatedAt authorAssociation author { login __typename } editor { login __typename }
         comments(first: 50) {
+          pageInfo { hasNextPage }
           nodes {
-            body url isMinimized authorAssociation author { login __typename }
-            replies(first: 50) { nodes { body url isMinimized authorAssociation author { login __typename } } }
+            body url isMinimized authorAssociation author { login __typename } editor { login __typename }
+            replies(first: 50) {
+              totalCount
+              nodes { body url isMinimized authorAssociation author { login __typename } editor { login __typename } }
+            }
           }
         }
       }
@@ -79,9 +86,12 @@ query($owner: String!, $name: String!) {
 }
 """
 
+EDITORS_QUERY = """
+query($ids: [ID!]!) { nodes(ids: $ids) { ... on Comment { id editor { login __typename } } } }
+"""
 
-class _Skip(Exception):
-    """An item whose revisions are not checked (its author is a skipped bot)."""
+CALLER_PIN = re.compile(r"public-hygiene\.yml@([0-9a-f]{40})")
+COMMENT_KINDS = ("comment", "review", "review comment", "discussion comment")
 
 
 @dataclass(frozen=True)
@@ -98,32 +108,64 @@ def _after(stamp: str | None, since: dt.datetime) -> bool:
     return dt.datetime.fromisoformat(stamp.replace("Z", "+00:00")) >= since
 
 
+def _edited_by_person(item: dict[str, Any]) -> bool:
+    login, kind = _user({"user": item.get("editor") or {}})
+    return bool(login) and not rules.is_skipped_author(login, kind)
+
+
+def caller_pin(api: Api, org: str, repo: str) -> str | None:
+    """None when the repository's caller pins a commit on the shared repository's main,
+    else what is wrong. Runs from main's code, so an impostor pin cannot vouch for itself."""
+    path = "public-text.yml" if repo == f"{org}/.github" else "public-hygiene.yml"
+    try:
+        content = api.get(f"/repos/{repo}/contents/.github/workflows/{path}") or {}
+    except ApiError as e:
+        if e.status == 404:
+            return "no caller workflow"
+        raise
+    try:
+        text = base64.b64decode(str(content.get("content") or "")).decode("utf-8", "replace")
+    except (ValueError, TypeError):
+        return "the caller workflow could not be read"
+    m = CALLER_PIN.search(text)
+    if not m:
+        return "the caller pins no commit"
+    ok, _message = pin.check(api, f"{org}/.github", m.group(1))
+    return None if ok else "the caller's pin is not a commit on the shared repository's main"
+
+
 def collect(api: Api, org: str, since: dt.datetime) -> tuple[list[Hit], int, list[str]]:
-    """Findings in public text, how many texts were read, and what could not be read
-    ("repo: what"). One unreadable part (issues turned off, a rate limit, a network
-    error) skips that part only; the sweep goes on with the rest."""
+    """Findings in public text, how many texts were read, and what could not be read or
+    checked in full ("repo: what"). One unreadable part (issues turned off, a rate limit,
+    a network error, a page cap) skips that part only; the sweep goes on with the rest."""
     stamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
     hits: list[Hit] = []
     scanned = 0
     unreadable: list[str] = []
+    gates: dict[str, AuthorGate] = {}
 
-    def check(repo: str, kind: str, item: dict[str, Any], texts: tuple[str | None, ...], skip_bots: bool = True) -> None:
+    def check(repo: str, kind: str, item: dict[str, Any], texts: tuple[str | None, ...], *, force: bool = False) -> None:
         nonlocal scanned
         login, account_type = _user(item)
-        if skip_bots and rules.is_skipped_author(login, account_type):
-            return
         if _hidden(item):
             return
+        if not force and kind != "release" and rules.is_skipped_author(login, account_type, comment=kind in COMMENT_KINDS) and not _edited_by_person(item):
+            return
         scanned += 1
-        ids = rules.rule_ids(*texts, outside=rules.is_outside_author(_assoc(item), account_type))
+        url = str(item.get("html_url") or item.get("url") or "")
+        if any(rules.was_truncated(t) for t in texts):
+            unreadable.append(f"{repo}: a {kind} too long to check in full ({url})")
+        ids = rules.rule_ids(*texts, outside=gates.setdefault(repo, AuthorGate(api, repo)).outside(login, _assoc(item), account_type))
         if ids:
-            hits.append(Hit(repo, kind, str(item.get("html_url") or item.get("url") or ""), tuple(ids)))
+            hits.append(Hit(repo, kind, url, tuple(ids)))
 
     for repo in api.get_all(f"/orgs/{org}/repos?type=public"):
         if repo.get("private") or repo.get("archived"):
             continue
         name = repo["full_name"]
         owner, short = name.split("/", 1)
+        # Items by a skipped bot, held until we know whether a person last edited them.
+        pending: list[tuple[str, dict[str, Any], tuple[str | None, ...]]] = []
 
         def read(what: str, path: str) -> list[Any]:
             try:
@@ -131,6 +173,20 @@ def collect(api: Api, org: str, since: dt.datetime) -> tuple[list[Hit], int, lis
             except ApiError:
                 unreadable.append(f"{name}: {what}")
                 return []
+
+        def check_or_hold(kind: str, item: dict[str, Any], texts: tuple[str | None, ...]) -> None:
+            login, account_type = _user(item)
+            if rules.is_skipped_author(login, account_type, comment=kind in COMMENT_KINDS) and item.get("node_id"):
+                pending.append((kind, item, texts))
+            else:
+                check(name, kind, item, texts)
+
+        try:
+            problem = caller_pin(api, org, name)
+        except ApiError:
+            problem = "the caller pin could not be checked"
+        if problem:
+            unreadable.append(f"{name}: caller pin ({problem})")
 
         try:
             threads = api.get_all(f"/repos/{name}/issues?state=all&since={stamp}")
@@ -145,53 +201,79 @@ def collect(api: Api, org: str, since: dt.datetime) -> tuple[list[Hit], int, lis
         for item in threads:
             kind = "pull request" if "pull_request" in item else "issue"
             number = int(item["number"])
-            check(name, kind, item, (item.get("title"), item.get("body")))
             if kind == "pull request":
                 for review in read(f"reviews of #{number}", f"/repos/{name}/pulls/{number}/reviews"):
-                    check(name, "review", review, (review.get("body"),))
-            # Earlier revisions of the description: GitHub keeps every one public. They are
-            # held to the same author rules as the description itself.
+                    check_or_hold("review", review, (review.get("body"),))
+            # The description, and its earlier revisions: GitHub keeps every one public.
+            # They are held to the same author rules as the description itself.
             login, account_type = _user(item)
-            skipped = rules.is_skipped_author(login, account_type)
-            outside = rules.is_outside_author(_assoc(item), account_type)
+            outside = gates.setdefault(name, AuthorGate(api, name)).outside(login, _assoc(item), account_type)
             try:
-                if skipped:
-                    raise _Skip
                 data = api.graphql(EDITS_QUERY, {"owner": owner, "name": short, "number": number})
-                node = (data.get("repository") or {}).get("issueOrPullRequest") or {}
-                edits = (node.get("userContentEdits") or {}).get("nodes") or []
-                current = node.get("body") or ""
-                earlier = [e["diff"] for e in edits[:MAX_EDITS] if e.get("diff") and e["diff"] != current]
-                found = [rules.rule_ids(d, outside=outside) for d in earlier]
-                flagged = sum(1 for ids in found if ids)
-                if flagged:
-                    ids = tuple(sorted({i for f in found for i in f}))
-                    hits.append(Hit(name, f"{flagged} earlier revision(s) of a {kind}", str(item.get("html_url") or ""), ids))
-            except _Skip:
-                pass
             except ApiError:
                 unreadable.append(f"{name}: revisions of #{number}")
+                check(name, kind, item, (item.get("title"), item.get("body")))
+                continue
+            node = (data.get("repository") or {}).get("issueOrPullRequest") or {}
+            by_person = _edited_by_person(node)
+            if rules.is_skipped_author(login, account_type, comment=False) and not by_person:
+                continue
+            check(name, kind, item, (item.get("title"), item.get("body")), force=True)
+            history = node.get("userContentEdits") or {}
+            edits = history.get("nodes") or []
+            if int(history.get("totalCount") or 0) > len(edits[:MAX_EDITS]):
+                unreadable.append(f"{name}: revisions of #{number} (more than {MAX_EDITS})")
+            current = node.get("body") or ""
+            earlier = [e["diff"] for e in edits[:MAX_EDITS] if e.get("diff") and e["diff"] != current]
+            found = [rules.rule_ids(d, outside=outside) for d in earlier]
+            flagged = sum(1 for ids in found if ids)
+            if flagged:
+                ids = tuple(sorted({i for f in found for i in f}))
+                hits.append(Hit(name, f"{flagged} earlier revision(s) of a {kind}", str(item.get("html_url") or ""), ids))
         for c in read("comments", f"/repos/{name}/issues/comments?since={stamp}"):
-            check(name, "comment", c, (c.get("body"),))
+            check_or_hold("comment", c, (c.get("body"),))
         for c in read("review comments", f"/repos/{name}/pulls/comments?since={stamp}"):
-            check(name, "review comment", c, (c.get("body"),))
+            check_or_hold("review comment", c, (c.get("body"),))
         for release in read("releases", f"/repos/{name}/releases"):
             # Checked whoever published them: a release workflow publishes as a bot, with
             # notes a person wrote.
-            check(name, "release", release, (release.get("name"), release.get("body")), skip_bots=False)
+            check(name, "release", release, (release.get("name"), release.get("body")))
         if repo.get("has_discussions"):
             try:
                 data = api.graphql(DISCUSSIONS_QUERY, {"owner": owner, "name": short})
-                for d in ((data.get("repository") or {}).get("discussions") or {}).get("nodes") or []:
+                conn = (data.get("repository") or {}).get("discussions") or {}
+                nodes = conn.get("nodes") or []
+                if (conn.get("pageInfo") or {}).get("hasNextPage") and nodes and _after(nodes[-1].get("updatedAt"), since):
+                    unreadable.append(f"{name}: discussions (more recent ones than one page)")
+                for d in nodes:
                     if not _after(d.get("updatedAt"), since):
                         continue
                     check(name, "discussion", d, (d.get("title"), d.get("body")))
-                    for c in (d.get("comments") or {}).get("nodes") or []:
+                    comments = d.get("comments") or {}
+                    if (comments.get("pageInfo") or {}).get("hasNextPage"):
+                        unreadable.append(f"{name}: comments of discussion #{d.get('number')} (more than one page)")
+                    for c in comments.get("nodes") or []:
                         check(name, "discussion comment", c, (c.get("body"),))
-                        for r in (c.get("replies") or {}).get("nodes") or []:
+                        replies = c.get("replies") or {}
+                        reply_nodes = replies.get("nodes") or []
+                        if int(replies.get("totalCount") or 0) > len(reply_nodes):
+                            unreadable.append(f"{name}: replies in discussion #{d.get('number')} (more than one page)")
+                        for r in reply_nodes:
                             check(name, "discussion comment", r, (r.get("body"),))
             except ApiError:
                 unreadable.append(f"{name}: discussions")
+        # A skipped bot's comment or review is checked when a person last edited it.
+        ids = [str(item["node_id"]) for _, item, _ in pending]
+        edited: set[str] = set()
+        try:
+            for i in range(0, len(ids), 100):
+                data = api.graphql(EDITORS_QUERY, {"ids": ids[i : i + 100]})
+                edited |= {str(n.get("id")) for n in data.get("nodes") or [] if isinstance(n, dict) and _edited_by_person(n)}
+        except ApiError:
+            unreadable.append(f"{name}: editors of bot comments")
+        for kind, item, texts in pending:
+            if str(item["node_id"]) in edited:
+                check(name, kind, item, texts, force=True)
     return hits, scanned, unreadable
 
 

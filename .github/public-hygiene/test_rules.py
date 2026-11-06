@@ -428,7 +428,9 @@ class RuleCases(unittest.TestCase):
             self.assertLess(len(rule.description), 220, rule.id)
 
     def test_format_characters_do_not_hide_a_match(self) -> None:
-        for ch in (0x200B, 0x2063, 0x202E, 0x00AD, 0xFEFF):
+        # Category Cf, and (F10) the other default-ignorable characters and the blank
+        # braille pattern.
+        for ch in (0x200B, 0x2063, 0x202E, 0x00AD, 0xFEFF, 0x34F, 0xFE0F, 0x180B, 0xE0100, 0x3164, 0xFFA0, 0x115F, 0x2800):
             with self.subTest(char=hex(ch)):
                 self.assertIn("private-reference", rules.rule_ids("Git" + chr(ch) + "Lab #5"))
 
@@ -460,6 +462,11 @@ class RuleCases(unittest.TestCase):
             self.assertFalse(rules.is_skipped_author(bot, "User"), bot)  # a person named like a bot
         for bot in ("github-actions[bot]", "some-ci[bot]"):
             self.assertFalse(rules.is_skipped_author(bot, "Bot"), bot)
+        # F9: review bots are skipped for comments only; their titles, descriptions and
+        # commits are checked.
+        for bot in ("sentry[bot]", "Copilot"):
+            self.assertFalse(rules.is_skipped_author(bot, "Bot", comment=False), bot)
+        self.assertTrue(rules.is_skipped_author("dependabot[bot]", "Bot", comment=False))
         self.assertFalse(rules.is_skipped_author(None, None))
 
 
@@ -468,7 +475,11 @@ TEST_KEY = bytes(range(32))  # a made-up key, for these tests only
 
 class InternalNames(unittest.TestCase):
     def setUp(self) -> None:
-        for name, value in (("DENYLIST_KEY", TEST_KEY), ("DENYLIST", frozenset(rules.term_hash(t, TEST_KEY) for t, _ in FAKE_TERMS))):
+        for name, value in (
+            ("DENYLIST_KEY", TEST_KEY),
+            ("DENYLIST", frozenset(rules.term_hash(t, TEST_KEY) for t, _ in FAKE_TERMS)),
+            ("CANARY", rules.term_hash(rules.CANARY_TERM, TEST_KEY)),
+        ):
             patcher = mock.patch.object(rules, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -501,9 +512,12 @@ class InternalNames(unittest.TestCase):
         self.assertIn("ip-address", without)
         self.assertEqual(rules.rule_ids(text), sorted(without + ["internal-name"]))
 
-    def test_a_different_key_matches_nothing(self) -> None:
+    def test_a_different_key_matches_nothing_and_says_so(self) -> None:
         with mock.patch.object(rules, "DENYLIST_KEY", bytes(32)):
+            self.assertFalse(rules.internal_names_enabled())  # the canary does not match
             self.assertNotIn("internal-name", rules.rule_ids(FAKE_TERMS[0][1]))
+        with mock.patch.object(rules, "CANARY", ""):
+            self.assertFalse(rules.internal_names_enabled())
 
     def test_keys_in_hex_or_text(self) -> None:
         self.assertEqual(rules._key_bytes(" 00ff \n"), bytes([0, 255]))
@@ -514,11 +528,16 @@ class Denylist(unittest.TestCase):
     def test_the_committed_list_is_hashes_only(self) -> None:
         path = rules.HERE / "denylist.txt"
         lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line and not line.startswith("#")]
-        self.assertGreater(len(lines), 50)
-        for line in lines:
+        canary = [line for line in lines if line.startswith("canary:")]
+        terms = [line for line in lines if not line.startswith("canary:")]
+        self.assertEqual(len(canary), 1)
+        self.assertRegex(canary[0], rf"^canary:[0-9a-f]{{{rules.DIGEST_CHARS}}}$")
+        self.assertGreater(len(terms), 50)
+        for line in terms:
             self.assertRegex(line, rf"^[0-9a-f]{{{rules.DIGEST_CHARS}}}$")
-        self.assertEqual(len(lines), len(set(lines)))
-        self.assertEqual(rules.load_denylist(path), frozenset(lines))
+        self.assertEqual(len(terms), len(set(terms)))
+        self.assertEqual(rules.load_denylist(path), frozenset(terms))
+        self.assertEqual(rules.load_canary(path), canary[0][len("canary:"):])
 
     def test_hash_terms_cli(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -529,7 +548,7 @@ class Denylist(unittest.TestCase):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.assertEqual(rules._main(["--hash-terms", str(plain), "--key-file", str(keyfile)]), 0)
-            self.assertEqual(out.getvalue().split(), [rules.term_hash("acme-vault-env", TEST_KEY)])
+            self.assertEqual(out.getvalue().split(), ["canary:" + rules.term_hash(rules.CANARY_TERM, TEST_KEY), rules.term_hash("acme-vault-env", TEST_KEY)])
             self.assertNotIn("acme", out.getvalue().lower())
             self.assertNotIn(TEST_KEY.hex(), out.getvalue())
             keyfile.write_text("0011", encoding="utf-8")
@@ -538,6 +557,7 @@ class Denylist(unittest.TestCase):
 
     def test_missing_file_is_an_empty_list(self) -> None:
         self.assertEqual(rules.load_denylist(Path("/nonexistent/denylist.txt")), frozenset())
+        self.assertEqual(rules.load_canary(Path("/nonexistent/denylist.txt")), "")
 
 
 class Limits(unittest.TestCase):
@@ -557,6 +577,40 @@ class Limits(unittest.TestCase):
             start = time.perf_counter()
             rules.scan(text)
             self.assertLess(time.perf_counter() - start, 4.0, repr(text[:12]))
+
+    def test_combining_mark_runs_normalize_in_linear_time(self) -> None:
+        # F13: CPython 3.12, the runner's, reorders a run of combining marks in quadratic
+        # time inside NFKC (6 s for this text before the cap on mark runs).
+        text = "a" + chr(0x301) * 32_768 + chr(0x316) * 32_768
+        start = time.perf_counter()
+        rules.scan(text, outside=True)
+        self.assertLess(time.perf_counter() - start, 1.0)
+        self.assertLessEqual(len(rules.normalize(text)), 1 + rules.MAX_MARK_RUN)
+
+    def test_mark_runs_are_capped_but_ordinary_accents_kept(self) -> None:
+        self.assertEqual(rules.normalize("e" + chr(0x301)), "\u00e9")
+        self.assertEqual(rules.rule_ids("Git" + chr(0x301) * 40 + "Lab #5"), rules.rule_ids("Git" + chr(0x301) * 30 + "Lab #5"))
+
+    @unittest.skipIf(os.environ.get("PUBLIC_HYGIENE_SKIP_SLOW") == "1", "slow; run in CI")
+    def test_findings_among_many_public_urls_scan_in_linear_time(self) -> None:
+        # F14: the public-URL filter was findings times URLs.
+        half = rules.MAX_SCAN_CHARS // 2
+        text = "dev@ " * (half // 5) + "http://github.com/ " * (half // 19)
+        start = time.perf_counter()
+        rules.scan(text)
+        self.assertLess(time.perf_counter() - start, 2.5)
+
+    def test_inside_is_a_binary_search_with_the_same_answers(self) -> None:
+        ranges = [(0, 5), (10, 20), (30, 31)]
+        starts = [a for a, _ in ranges]
+        for span, want in (((0, 5), True), ((11, 19), True), ((4, 11), False), ((25, 26), False), ((30, 31), True), ((31, 32), False)):
+            self.assertEqual(rules._inside(span, ranges, starts), want, span)
+        self.assertFalse(rules._inside((1, 2), [], []))
+
+    def test_a_cut_after_nfkc_is_reported(self) -> None:
+        # F4: U+FB00 folds to two characters, so a text under the cap can be cut after NFKC.
+        self.assertTrue(rules.was_truncated(chr(0xFB00) * 75_100 + " from 10.20.30.40"))
+        self.assertFalse(rules.was_truncated(chr(0xFB00) * 1_000))
 
     def test_expansion_is_not_folded_and_long_text_is_capped(self) -> None:
         self.assertEqual(rules.normalize(chr(0xFDFA) * 100), chr(0xFDFA) * 100)

@@ -28,8 +28,9 @@ Two kinds of rule:
   organization secret PUBLIC_HYGIENE_DENYLIST_KEY, given to the check in the environment
   variable of the same name. Without the key nobody can test a guess against the list,
   so it tells a reader how many terms there are and nothing else. A run without the key
-  (a fork's pull request, Dependabot) skips this one rule and says so; every other rule
-  still runs. The plain list and the key are kept outside the repository, and
+  (a fork's pull request, Dependabot), or with a key the list was not built with (the
+  `canary:` line is the keyed hash of CANARY_TERM), skips this one rule and says so;
+  every other rule still runs. The plain list and the key are kept outside the repository, and
   `--hash-terms` turns the list into denylist lines.
 
 What is out of scope, on purpose:
@@ -60,9 +61,11 @@ Documented exceptions (the allowlist), each next to the rule it narrows:
 
 Every pattern is linear on a body of any length: no unbounded repeat can start at every
 position of a run and scan to its end, repeats inside repeated groups are bounded, and
-adjacent whitespace quantifiers are possessive (written `*+`, Python 3.11 or newer). The
-scanned text is capped at MAX_SCAN_CHARS after normalization, and a text that NFKC would
-expand more than twofold is scanned without NFKC. test_rules.py holds the worst shapes
+adjacent whitespace quantifiers are possessive (written `*+`, Python 3.11 or newer), and
+the public-URL filter is a binary search. Before NFKC, runs of combining marks are capped
+at MAX_MARK_RUN (NFKC is quadratic on such runs in CPython 3.12), and a text that NFKC
+would expand more than twofold is scanned without NFKC. The scanned form is capped at
+MAX_SCAN_CHARS, and a cut text is reported (`was_truncated`), never passed quietly. test_rules.py holds the worst shapes
 found by fuzzing to a time bound.
 
 Planted examples in the tests are synthetic and assembled at run time, so that this
@@ -71,6 +74,7 @@ repository's own secret scan does not trip on them.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import hmac
 import os
@@ -667,17 +671,33 @@ def term_hash(term: str, key: bytes | None = None) -> str:
     return hmac.new(k, term.lower().encode("utf-8"), hashlib.sha256).hexdigest()[:DIGEST_CHARS]
 
 
+# A fixed public term whose keyed hash `denylist.txt` carries on its `canary:` line, so a
+# wrong or rotated key is noticed rather than matching nothing in silence.
+CANARY_TERM = "public-hygiene-canary"
+
+
 def internal_names_enabled() -> bool:
-    """False when this run has no denylist key, so `internal-name` cannot run."""
-    return bool(DENYLIST_KEY) and bool(DENYLIST)
+    """False when this run has no denylist key, or a key the denylist was not built with,
+    so `internal-name` cannot run."""
+    return bool(DENYLIST_KEY) and bool(DENYLIST) and bool(CANARY) and term_hash(CANARY_TERM) == CANARY
+
+
+def _denylist_lines(path: Path) -> list[str]:
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
 
 
 def load_denylist(path: Path = HERE / "denylist.txt") -> frozenset[str]:
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    return frozenset(line.strip() for line in lines if line.strip() and not line.startswith("#"))
+    return frozenset(line for line in _denylist_lines(path) if not line.startswith("canary:"))
+
+
+def load_canary(path: Path = HERE / "denylist.txt") -> str:
+    found = [line[len("canary:"):] for line in _denylist_lines(path) if line.startswith("canary:")]
+    return found[0] if found else ""
 
 
 DENYLIST = load_denylist()
+CANARY = load_canary()
 
 # Candidate tokens. Each pattern has a lookbehind that refuses a start inside a run of its
 # own characters, so a long run is matched once, not once per position.
@@ -798,31 +818,71 @@ RULES: tuple[Rule, ...] = (
 RULES_BY_ID = {rule.id: rule for rule in RULES}
 
 
+# At most this many combining marks in a row (UAX #15 "stream-safe" text). CPython 3.12,
+# the runner's, reorders a long run of marks in quadratic time inside NFKC.
+MAX_MARK_RUN = 30
+
+# Characters that render as nothing (Unicode Default_Ignorable_Code_Point, which is wider
+# than category Cf: variation selectors, the combining grapheme joiner, Hangul fillers,
+# Mongolian selectors, tag characters), plus the blank braille pattern.
+_IGNORABLE_RANGES = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x2800, 0x2800),
+    (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+)
+_IGNORABLE_STARTS = [a for a, _ in _IGNORABLE_RANGES]
+
+
+def _ignorable(cp: int) -> bool:
+    i = bisect.bisect_right(_IGNORABLE_STARTS, cp) - 1
+    return i >= 0 and cp <= _IGNORABLE_RANGES[i][1]
+
+
 def _strip_format_chars(text: str) -> str:
-    """Remove every format character (Unicode category Cf: zero-width spaces and joiners,
-    bidirectional overrides, invisible operators, soft hyphens), so none can hide a match."""
+    """Remove every invisible character (category Cf and the other default-ignorable code
+    points), so none can hide a match, and keep at most MAX_MARK_RUN combining marks in a
+    row, so NFKC stays linear."""
     if text.isascii():
         return text
-    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    out: list[str] = []
+    run = 0
+    for ch in text:
+        if unicodedata.category(ch) == "Cf" or _ignorable(ord(ch)):
+            continue
+        run = run + 1 if unicodedata.combining(ch) else 0
+        if run <= MAX_MARK_RUN:
+            out.append(ch)
+    return "".join(out)
 
 
-def normalize(text: str) -> str:
-    """Line ends as LF, format characters removed, NFKC (unless it would more than double
-    the text), capped at MAX_SCAN_CHARS. Offsets in findings refer to this form."""
+def _normalize(text: str) -> tuple[str, bool]:
+    """The scanned form of `text`, and whether it was cut at MAX_SCAN_CHARS."""
     text = _strip_format_chars(text.replace("\r\n", "\n").replace("\r", "\n"))
     folded = unicodedata.normalize("NFKC", text)
     if len(folded) > 2 * len(text) + 16:
         folded = text  # an expansion attack (U+FDFA is 18 characters under NFKC)
-    return folded[:MAX_SCAN_CHARS]
+    return folded[:MAX_SCAN_CHARS], len(folded) > MAX_SCAN_CHARS
+
+
+def normalize(text: str) -> str:
+    """Line ends as LF, invisible characters removed, mark runs capped, NFKC (unless it
+    would more than double the text), cut at MAX_SCAN_CHARS. Offsets in findings refer to
+    this form."""
+    return _normalize(text)[0]
 
 
 def was_truncated(text: str | None) -> bool:
-    """True when `scan` saw only the first MAX_SCAN_CHARS characters of `text`."""
-    return bool(text) and len(text) > MAX_SCAN_CHARS
+    """True when `scan` saw only part of `text`: the cut is measured on the normalized
+    form, which NFKC can make longer than the text itself."""
+    return bool(text) and _normalize(text)[1]
 
 
-def _inside(span: tuple[int, int], ranges: list[tuple[int, int]]) -> bool:
-    return any(a <= span[0] and span[1] <= b for a, b in ranges)
+def _inside(span: tuple[int, int], ranges: list[tuple[int, int]], starts: list[int]) -> bool:
+    """Whether `span` lies inside one of `ranges` (sorted, not overlapping; `starts` are
+    their start offsets). A binary search, so many findings among many URLs stay linear."""
+    i = bisect.bisect_right(starts, span[0]) - 1
+    return i >= 0 and span[1] <= ranges[i][1]
 
 
 def scan(text: str | None, *, outside: bool = False) -> list[Finding]:
@@ -835,12 +895,13 @@ def scan(text: str | None, *, outside: bool = False) -> list[Finding]:
         return []
     text = normalize(text)
     public = [(m.start(), m.end()) for m in PUBLIC_URL.finditer(text)]
+    starts = [a for a, _ in public]
     findings: list[Finding] = []
     for rule in RULES:
         if outside and not rule.for_everyone:
             continue
         for start, end in rule.finder(text):
-            if rule.honours_public_urls and _inside((start, end), public):
+            if rule.honours_public_urls and _inside((start, end), public, starts):
                 continue
             findings.append(Finding(rule.id, start, end))
     findings.sort(key=lambda f: (f.start, f.rule))
@@ -852,8 +913,13 @@ def rule_ids(*texts: str | None, outside: bool = False) -> list[str]:
     return sorted({f.rule for text in texts for f in scan(text, outside=outside)})
 
 
-def is_skipped_author(login: str | None, account_type: str | None) -> bool:
-    return account_type == "Bot" and (login or "") in SKIPPED_BOTS
+def is_skipped_author(login: str | None, account_type: str | None, *, comment: bool = True) -> bool:
+    """Whether text by this author is skipped. Review bots are skipped for comments only
+    (`comment=True`: comments, reviews, review comments); a title, a description or a
+    commit by one is checked like anyone's."""
+    if account_type != "Bot":
+        return False
+    return (login or "") in (SKIPPED_BOTS if comment else UPSTREAM_BOTS)
 
 
 # The author associations of the organization's own people.
@@ -887,6 +953,7 @@ def _main(argv: list[str]) -> int:
         if len(key) < 16:
             print("The key file must hold at least 16 bytes (32 hex digits).", file=sys.stderr)
             return 2
+        print("canary:" + term_hash(CANARY_TERM, key))
         for line in Path(argv[1]).read_text(encoding="utf-8").splitlines():
             term = line.strip()
             if term and not term.startswith("#"):

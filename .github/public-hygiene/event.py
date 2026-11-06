@@ -165,8 +165,11 @@ class RestApi:
             page, link = self._request("GET", url)
             out.extend(page or [])
             m = re.search(r'<([^>]+)>;\s*rel="next"', link)
-            if not m or not m.group(1).startswith(self.base + "/"):
+            if not m:
                 return out
+            if not m.group(1).startswith(self.base + "/"):
+                # Never follow it, and never take the list as complete either.
+                raise ApiError(f"GET {path.split('?')[0]}: a next page on another host")
             url = m.group(1)
         raise ApiError(f"GET {path.split('?')[0]}: more than {max_pages} pages")
 
@@ -192,9 +195,15 @@ class Source:
     account_type: str | None
     texts: tuple[str | None, ...]
     association: str | None = None
-    # Scan even when the author is a skipped bot: a person edited it in this event.
+    # Scan even when the author is a skipped bot: a person edited it (in this event, or
+    # as its last editor).
     edited_by_person: bool = False
-    truncated: bool = field(default=False, compare=False)
+    node_id: str = ""
+    hidden: bool = False
+
+    @property
+    def is_comment(self) -> bool:
+        return self.kind in ("comment", "review", "review comment")
 
 
 @dataclass(frozen=True)
@@ -226,7 +235,7 @@ def _hidden(item: dict[str, Any]) -> bool:
 
 def _source(kind: str, item: dict[str, Any], texts: tuple[str | None, ...], key: str | None = None, url: str | None = None) -> Source:
     login, account_type = _user(item)
-    return Source(
+    src = Source(
         kind,
         key or f"{kind}:{item.get('id')}",
         str(url if url is not None else item.get("html_url") or item.get("url") or ""),
@@ -235,6 +244,11 @@ def _source(kind: str, item: dict[str, Any], texts: tuple[str | None, ...], key:
         texts,
         _assoc(item),
     )
+    src.node_id = str(item.get("node_id") or "")
+    src.hidden = _hidden(item)
+    editor_login, editor_type = _user({"user": item.get("editor") or {}})
+    src.edited_by_person = bool(editor_login) and not rules.is_skipped_author(editor_login, editor_type)
+    return src
 
 
 def _head(kind: str, item: dict[str, Any]) -> list[Source]:
@@ -285,7 +299,7 @@ def payload_sources(event_name: str, payload: dict[str, Any]) -> list[Source]:
         release = payload["release"]
         out.append(_source("release", release, (release.get("name"), release.get("body")), key="release"))
     for s in out:
-        s.edited_by_person = by_person
+        s.edited_by_person = s.edited_by_person or by_person
     return out
 
 
@@ -298,34 +312,95 @@ def issue_thread(api: Api, repo: str, number: int, is_pr: bool) -> tuple[list[So
     sources += [
         _source("comment", c, (c.get("body"),), key=f"comment:{c.get('node_id') or c.get('id')}")
         for c in comments
-        if not _is_own_comment(c) and not _hidden(c)
+        if not _is_own_comment(c)
     ]
     if is_pr:
         sources += [_source("review", r, (r.get("body"),)) for r in api.get_all(f"/repos/{repo}/pulls/{number}/reviews")]
         sources += [_source("review comment", c, (c.get("body"),)) for c in api.get_all(f"/repos/{repo}/pulls/{number}/comments")]
-        # Commit messages and the addresses they carry. The API lists at most 250.
+        # Commit messages and the addresses they carry. The API lists at most 250, so a
+        # longer pull request cannot be checked in full.
         pr_association = _assoc(issue)
-        for c in api.get_all(f"/repos/{repo}/pulls/{number}/commits", MAX_COMMIT_PAGES):
+        commits = api.get_all(f"/repos/{repo}/pulls/{number}/commits", MAX_COMMIT_PAGES)
+        total = int((api.get(f"/repos/{repo}/pulls/{number}") or {}).get("commits") or 0)
+        if total > len(commits):
+            raise ApiError(f"GET /repos/{repo}/pulls/{number}/commits: {total} commits, {len(commits)} listed")
+        for c in commits:
             commit = c.get("commit") or {}
             texts = (commit.get("message"), (commit.get("author") or {}).get("email"), (commit.get("committer") or {}).get("email"))
             src = _source("commit message", {"user": c.get("author") or {}, "id": c.get("sha")}, texts, url=c.get("html_url"))
             src.association = pr_association
             sources.append(src)
+    annotate(api, sources)
     return sources, comments
+
+
+class AuthorGate:
+    """Who counts as outside the organization (checked for credentials only).
+
+    `author_association` alone is not enough: to a viewer that cannot see an
+    organization's private memberships, a member reads CONTRIBUTOR or NONE. So an author
+    whose association is not inside is looked up once: outside only when the API says
+    their permission on the repository is `read` or `none`. Any doubt (an API error, an
+    unknown answer) counts as inside, which means more checking, never less."""
+
+    def __init__(self, api: Api, repo: str) -> None:
+        self.api, self.repo = api, repo
+        self.cache: dict[str, bool] = {}
+
+    def outside(self, login: str | None, association: str | None, account_type: str | None) -> bool:
+        if not rules.is_outside_author(association, account_type) or not login:
+            return False
+        if login not in self.cache:
+            try:
+                answer = self.api.get(f"/repos/{self.repo}/collaborators/{login}/permission") or {}
+                self.cache[login] = answer.get("permission") in ("read", "none")
+            except ApiError:
+                self.cache[login] = False
+        return self.cache[login]
+
+
+ANNOTATE_QUERY = """
+query($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Comment { id editor { login __typename } }
+    ... on Minimizable { isMinimized }
+  }
+}
+"""
+
+
+def annotate(api: Api, sources: list[Source]) -> None:
+    """What REST does not say: whether a review or review comment is hidden, and who last
+    edited an item (a person's edit to a skipped bot's text is checked)."""
+    by_id: dict[str, list[Source]] = {}
+    for src in sources:
+        if src.node_id:
+            by_id.setdefault(src.node_id, []).append(src)  # a title and its description share one
+    ids = list(by_id)
+    for i in range(0, len(ids), 100):
+        data = api.graphql(ANNOTATE_QUERY, {"ids": ids[i : i + 100]})
+        for node in data.get("nodes") or []:
+            if not isinstance(node, dict) or node.get("id") not in by_id:
+                continue
+            login, kind = _user({"user": node.get("editor") or {}})
+            for src in by_id[node["id"]]:
+                src.hidden = src.hidden or bool(node.get("isMinimized"))
+                if login and not rules.is_skipped_author(login, kind):
+                    src.edited_by_person = True
 
 
 DISCUSSION_QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
     discussion(number: $number) {
-      id title body url authorAssociation author { login __typename }
+      id title body url authorAssociation author { login __typename } editor { login __typename }
       comments(first: 50, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id body url isMinimized authorAssociation author { login __typename }
+          id body url isMinimized authorAssociation author { login __typename } editor { login __typename }
           replies(first: 50) {
             totalCount
-            nodes { id body url isMinimized authorAssociation author { login __typename } }
+            nodes { id body url isMinimized authorAssociation author { login __typename } editor { login __typename } }
           }
         }
       }
@@ -353,15 +428,14 @@ def discussion_thread(api: Api, repo: str, number: int) -> tuple[list[Source], l
         conn = discussion.get("comments") or {}
         for c in conn.get("nodes") or []:
             top.append(c)
-            if not _is_own_comment(c) and not _hidden(c):
+            if not _is_own_comment(c):
                 sources.append(_source("comment", c, (c.get("body"),), key=f"comment:{c.get('id')}"))
             replies = c.get("replies") or {}
             nodes = replies.get("nodes") or []
             if int(replies.get("totalCount") or 0) > len(nodes):
                 raise ApiError("POST /graphql: more replies than one page")
             for r in nodes:
-                if not _hidden(r):
-                    sources.append(_source("comment", r, (r.get("body"),), key=f"comment:{r.get('id')}"))
+                sources.append(_source("comment", r, (r.get("body"),), key=f"comment:{r.get('id')}"))
         page = conn.get("pageInfo") or {}
         if not page.get("hasNextPage"):
             return sources, top, node_id
@@ -522,6 +596,7 @@ def run(env: dict[str, str], api: Api | None = None) -> int:
     discussion_id = ""
     problems: list[str] = []
     thread_read = True
+    incomplete = False  # read, but not all of it scanned (a cut text)
     if target.kind != "release":
         try:
             if target.kind == "discussion":
@@ -533,10 +608,16 @@ def run(env: dict[str, str], api: Api | None = None) -> int:
             thread_read = False
             problems.append(f"The thread could not be read in full ({e}); only the event's own item was checked.")
     for s in payload_sources(event_name, payload):
+        listed = by_key.get(s.key)
+        if listed is not None:
+            # The payload's text is fresher; what the API said about the item still holds.
+            s.edited_by_person = s.edited_by_person or listed.edited_by_person
+            s.hidden = s.hidden or listed.hidden
         by_key[s.key] = s
 
     results: list[tuple[Source, list[str]]] = []
     scanned = 0
+    gate = AuthorGate(api, repo)
     for source in by_key.values():
         try:
             _Deadline.check()
@@ -544,19 +625,23 @@ def run(env: dict[str, str], api: Api | None = None) -> int:
             problems.append(f"Stopped early: {e}.")
             thread_read = False
             break
-        if rules.is_skipped_author(source.login, source.account_type) and not source.edited_by_person:
+        if source.hidden:
+            continue
+        if rules.is_skipped_author(source.login, source.account_type, comment=source.is_comment) and not source.edited_by_person:
             continue
         scanned += 1
         if any(rules.was_truncated(t) for t in source.texts):
-            problems.append(f"A {source.kind} is longer than {rules.MAX_SCAN_CHARS} characters; only the start was checked.")
-        outside = rules.is_outside_author(source.association, source.account_type)
+            # Fail closed: the rest of the text was never checked.
+            problems.append(f"A {source.kind} is longer than {rules.MAX_SCAN_CHARS} characters after normalization; only the start was checked.")
+            incomplete = True
+        outside = gate.outside(source.login, source.association, source.account_type)
         ids = rules.rule_ids(*source.texts, outside=outside)
         if ids:
             results.append((source, ids))
 
     if not rules.internal_names_enabled():
         # Neutral on purpose: forks and Dependabot runs get no secrets.
-        problems.append("The internal-name rule did not run (no denylist key in this run); every other rule did.")
+        problems.append("The internal-name rule did not run (no valid denylist key in this run); every other rule did.")
     print(f"Checked {scanned} text(s) in {NOUN[target.kind]} {target.number if target.kind != 'release' else ''}".rstrip() + ".")
     for p in problems:
         print(f"::warning::{p}")
@@ -581,7 +666,7 @@ def run(env: dict[str, str], api: Api | None = None) -> int:
         ids = sorted({rule_id for _, rids in results for rule_id in rids})
         print(f"::error::Public hygiene findings: {', '.join(ids)}. The matched text is not shown; see the rules in the check's comment or summary.")
         return 1
-    if not thread_read:
+    if not thread_read or incomplete:
         print("::error::The thread could not be checked in full, so this run fails rather than passes.")
         return 2
     return 0

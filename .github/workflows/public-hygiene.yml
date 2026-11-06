@@ -16,11 +16,19 @@ name: Public hygiene
 # Jobs:
 # - `text`: the check. Exit 1 on a finding; exit 2 when the thread could not be read in
 #   full (an API error, too many pages, the time budget). Every event type writes a check
-#   run with this same name, and the latest one is the one that counts. That is sound
-#   because every run reads the whole thread and fails closed: a later run can only be
-#   green if the whole thread was read and was clean.
-# - `pin`: fails unless the caller's pin is a commit on this repository's main, so a
-#   pin to an unmerged or impostor commit stays red.
+#   run with this same name, and the latest one is the one that counts. Within one pull
+#   request that is sound: every run reads the whole thread and fails closed, so a later
+#   run can only be green if the whole thread was read and was clean. It holds per pull
+#   request only. Runs for issues, issue comments, discussions and releases attach to
+#   the default branch's head commit, so a finding in a pull request's conversation
+#   comment shows in the bot comment, not in the pull request's own check, and on the
+#   default branch one thread's green run replaces another's red one under this name. If
+#   the check is ever made required, derive it from pull-request-scoped events, or write
+#   a commit status from these runs (that needs `statuses: write`).
+# - `pin`: fails unless the caller's pin is a commit on this repository's main. It runs
+#   the pinned commit's own code, so it catches a pin left on an unmerged commit, not an
+#   impostor commit (which could skip it). The weekly sweep, which runs from main,
+#   checks every caller's pin for that; a reviewer still checks pins by hand.
 #
 # Safe on untrusted text by construction:
 # - Nothing from the caller's repository is checked out or run. The only checkout is

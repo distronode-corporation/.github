@@ -4,11 +4,19 @@ branch.
 
     python3 pin.py
 
-Run by the `pin` job of `.github/workflows/public-hygiene.yml`. A caller's
-`uses: ...@<sha>` resolves any commit GitHub can see under this repository's name,
-including one pushed to a pull request branch or to a fork (an impostor commit). This
-job fails unless the pinned commit is the default branch's head or one of its ancestors,
-so a pin to anything that was not reviewed and merged stays red.
+Run by the `pin` job of `.github/workflows/public-hygiene.yml`, and by the weekly sweep.
+A caller's `uses: ...@<sha>` resolves any commit GitHub can see under this repository's
+name, including one pushed to a pull request branch or to a fork (an impostor commit).
+`check` passes only when the pinned commit is the default branch's head or one of its
+ancestors.
+
+What each caller catches:
+- The `pin` job runs the pinned commit's own code, so it catches an honest mistake (a
+  pin left on a pull request branch). It cannot catch an impostor commit: that commit's
+  own `pin` job can simply pass, or not exist.
+- The sweep runs from this repository's main, reads every public repository's caller
+  file and checks its pin with this function, so an impostor pin is reported there.
+- A reviewer still checks a caller's pin by hand before merging it.
 
 Environment: WORKFLOW_REPOSITORY and WORKFLOW_SHA (from the `job` context, which names
 the called workflow's own repository and commit), GH_TOKEN, GITHUB_API_URL.
