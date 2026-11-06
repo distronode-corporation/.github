@@ -496,5 +496,34 @@ class GapsLeftBy11(Case):
         ])
 
 
+class SeerRound3(Case):
+    """Seer round 3 on #15: PowerShell's `$Env:` drive in any case is a reference, and a
+    flag's `key=value` option list (BuildKit's `--secret id=...`) is not the secret."""
+
+    def test_env_drive_in_any_case_is_a_reference(self) -> None:
+        self.quiet([
+            "ConvertTo-SecureString $Env:DB_PASSWORD_2 -AsPlainText -Force",
+            "ConvertTo-SecureString $ENV:DbPassword2 -AsPlainText",
+            "$password = $Env:DB_PASSWORD_2",
+        ])
+        self.fire([
+            J(["ConvertTo-SecureString '", "Kx92mLq7", "ZtPq' -AsPlainText"]),
+            J(["password = $Env:", "Kx9-2mLq7", "ZtPq"]),  # not a name shape
+        ])
+
+    def test_a_flag_option_list_is_not_the_secret(self) -> None:
+        self.quiet([
+            "docker buildx build --secret id=npmrc2,src=$HOME/.npmrc .",
+            "docker build --secret id=gh_token2,env=GH_TOKEN .",
+            '--secret "id=npmrc2,src=/run/secrets/x"',
+        ])
+        self.fire([
+            J(["--secret ", "Kx92mLq7", "ZtPq"]),
+            J(["--password ", "Kx92mLq7", "ZtPqAbCd=="]),  # padding is not a key
+            J(['--token "', "Kx9 2mLq7", 'ZtPq"']),
+            J(["--api-key ", "kx92mlq7ztpq", "abcdefgh="]),  # a trailing `=` is padding
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

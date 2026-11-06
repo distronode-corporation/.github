@@ -247,8 +247,12 @@ TOKEN_PATTERNS = (
     ),
     # A flag and its value as separate arguments (`--password VALUE`, `--api-key "a b"`).
     # The dashes are required here, and a flag with more after its key (`--password-stdin`,
-    # `--token-file`) is not this key.
-    _c(r"(?<![\w-])-{1,2}" + _SNAKE_KEY + r"[ \t]++" + _VALUE, IC),
+    # `--token-file`) is not this key. A value that opens as a `key=value` option list
+    # (BuildKit's `--secret id=npmrc,src=...`) is the option, not the secret. Padding
+    # (`...=`, `...==`) is not a key. The known gap: an all-lowercase alphanumeric value with
+    # an `=` and more characters after it within its first 32 characters, a shape no base64
+    # or hex secret has.
+    _c(r"(?<![\w-])-{1,2}" + _SNAKE_KEY + r"[ \t]++(?!['\"]?(?-i:[a-z][a-z0-9_\-]{0,30})=[^\s='\",])" + _VALUE, IC),
     # A YAML block scalar: `password: |` (or `>-`, `|2`), the value on the next, indented
     # line.
     _c(r"(?<![\w-])" + _SNAKE_KEY + r"['\"]?[ \t]*+:[ \t]*+[|>][+\-]?[1-9]?[+\-]?[ \t]*+\n[ \t]++" + _VALUE, IC),
@@ -275,7 +279,7 @@ URL_VALUE = _c(r"[a-z][a-z0-9+.\-]{0,30}://(?:([^/?#@]*)@)?[^/?#]*", IC)
 URL_PARTS = _c(r"[/?&#;=]")
 # A template's whole span (`${X}`, `${{ x }}`, `$(cmd)`, `{{ x }}`, `{% x %}`, `{name}`,
 # `%(x)s`), or a whole value that is a variable (`$NAME`, `$name`, `$dbPassword2`,
-# `$env:NAME`, `%NAME%`, `%DbPassword2%`, PowerShell's `$DbPassword2`, whose words are
+# `$env:NAME` (any case: `$Env:`, `$ENV:`), `%NAME%`, `%DbPassword2%`, PowerShell's `$DbPassword2`, whose words are
 # letters and whose digits end it). A value that is a template and little else is a
 # placeholder; a real secret that merely holds a brace, a dollar or a percent sign is not
 # (`%2B` is URL encoding). Closed templates only: an opener with no closer counts only
@@ -285,7 +289,7 @@ TEMPLATE_SPAN = _c(
     r"\$\{\{.{0,200}?\}\}|\$\{[^{}]{0,200}\}|\$\([^()]{0,200}\)|\{\{.{0,200}?\}\}"
     r"|\{%.{0,200}?%\}|\{[A-Za-z_][\w.\-]{0,100}\}|%\([^()]{0,100}\)s?"
     r"|^\$(?:[A-Z_][A-Z0-9_]*|[a-z_][a-z0-9_]*)$|%[A-Z_][A-Z0-9_]{2,}%|^%[a-z_][a-z0-9_]*%$"
-    r"|^\$env:[A-Za-z_][A-Za-z0-9_]*$|^\$[a-z_][a-z0-9_]*(?:[A-Z][a-z0-9_]+)+$|^%[A-Za-z_][A-Za-z0-9_]{2,}%$"
+    r"|^\$(?i:env):[A-Za-z_][A-Za-z0-9_]*$|^\$[a-z_][a-z0-9_]*(?:[A-Z][a-z0-9_]+)+$|^%[A-Za-z_][A-Za-z0-9_]{2,}%$"
     r"|^\$(?:[A-Z][a-z]+)+[0-9_]*$"
 )
 # A mask or an angle-bracket placeholder: never a secret, whatever surrounds it.
