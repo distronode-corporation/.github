@@ -163,11 +163,13 @@ TOKEN_PATTERNS = (
     _c(r"(?<![\w-])eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"),
     _c(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"),
     # A password in a URL's user info.
-    _c(r"(?<![\w-])[a-z][a-z0-9+.\-]*://[^\s/:@]+:[^\s/@]{6,}@[\w.\-]+", IC),
+    _c(r"(?<![\w+.\-])[a-z][a-z0-9+.\-]*://[^\s/:@]+:[^\s/@]{6,}@[\w.\-]+", IC),
     # `password = value` and friends, with a value that is not a placeholder.
     _c(
         # Prefixed names and flags count too: `DB_PASSWORD=`, `CLIENT_SECRET:`, `--password=`.
-        r"(?<![\w])(?:-{1,2})?(?:[A-Za-z0-9]+[_\-])*(?:password|passwd|secret|api[_\-]?key|access[_\-]?token|auth[_\-]?token)"
+        # The lookbehind refuses a start after a hyphen and the prefix is bounded, so a long
+        # `a-a-a-...` chain is linear, not quadratic.
+        r"(?<![\w-])(?:-{1,2})?(?:[A-Za-z0-9]+[_\-]){0,4}(?:password|passwd|secret|api[_\-]?key|access[_\-]?token|auth[_\-]?token)"
         r"\s*[:=]\s*['\"]?[A-Za-z0-9_\-+/=.]{12,}",
         IC,
     ),
@@ -299,8 +301,8 @@ IAM_WIF = (
     _c(r"--workload-identity-pool\b", IC),
     _c(r"\bprincipal(?:Set)?://", IC),
     _c(r"(?<![\w/-])roles/(?:[a-z][A-Za-z0-9]*\.[A-Za-z0-9.]+|owner|editor|viewer)\b"),
-    _c(r"[A-Za-z0-9._\-]+@[a-z0-9\-]+\.iam\.gserviceaccount\.com\b", IC),
-    _c(r"[A-Za-z0-9._\-]+\.svc\.id\.goog\b", IC),
+    _c(r"(?<![A-Za-z0-9._\-])[A-Za-z0-9._\-]+@[a-z0-9\-]+\.iam\.gserviceaccount\.com\b", IC),
+    _c(r"(?<![A-Za-z0-9._\-])[A-Za-z0-9._\-]+\.svc\.id\.goog\b", IC),
     _c(r"\b(?:iam|sts):[A-Z][A-Za-z]+\b"),
 )
 
@@ -397,9 +399,10 @@ VERSION_CONTEXT = _c(
     r"(?:==|>=|<=|~=|!=|\^|~)\s*|\bbump(?:s|ed)?\s+)$",
     IC,
 )
-# An arrow from another version (`2.0.6 \u2192 2.0.6.1`, `1.2 -> 1.2.0.1`): an upgrade, not
-# a hop to a host (`LB -> addr` still counts).
-VERSION_ARROW = _c(r"\d+(?:\.\d+){1,3}\s*(?:->|\u2192)\s*$")
+# An arrow from a two- or three-part version (`2.0.6 \u2192 2.0.6.1`, `1.2 -> 1.2.0.1`): an
+# upgrade, not a hop to a host. A four-part quad before the arrow is an address itself
+# (`127.0.0.1 -> addr`), so `LB -> addr` and `addr -> addr` still count.
+VERSION_ARROW = _c(r"(?<![\d.])\d+(?:\.\d+){1,2}\s*(?:->|\u2192)\s*$")
 VERSION_SUFFIX = _c(r"\+[0-9A-Za-z]|-(?:alpha|beta|rc|pre|preview|dev|snapshot|nightly)\b", IC)
 DOC_NETS = tuple(
     ipaddress.ip_network(n)

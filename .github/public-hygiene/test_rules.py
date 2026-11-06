@@ -202,6 +202,7 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "HOST=34.120.7.9",
             "--server=34.120.7.9",
             "LB -> 34.120.7.9",
+            "tunnel 127.0.0.1 -> 10.0.0.5",
             "ingress \u2192 34.120.7.9",
             "the 34.120.7.9-prod box",
             "range 34.120.7.9-34.120.7.20",
@@ -332,6 +333,17 @@ class RuleCases(unittest.TestCase):
         self.assertEqual(rules.rule_ids("https://github.com/o/r/actions/runs/1/job/123456789012"), [])
         token = fake("gh" + "p_", 36)
         self.assertIn("token", rules.rule_ids(f"https://github.com/o/r?t={token}"))
+
+    def test_long_adversarial_bodies_scan_in_linear_time(self) -> None:
+        # GitHub caps a body at 65,536 characters. Each shape here once made a pattern
+        # quadratic (minutes for one body); every one must now take well under a second.
+        import time
+
+        for unit in ("a-", "a.", ".", "eyJa.", "A_", "a@", "a://b@", "1.", "x@y."):
+            text = (unit * (65536 // len(unit) + 1))[:65536]
+            start = time.perf_counter()
+            rules.scan(text)
+            self.assertLess(time.perf_counter() - start, 3.0, unit)
 
     def test_empty_text(self) -> None:
         self.assertEqual(rules.scan(None), [])
