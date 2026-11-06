@@ -93,7 +93,14 @@ def collect(api: Api, org: str, since: dt.datetime) -> tuple[list[Hit], int, lis
                 unreadable.append(f"{name}: {what}")
                 return []
 
-        for item in read("issues and pull requests", f"/repos/{name}/issues?state=all&since={stamp}"):
+        try:
+            threads = api.get_all(f"/repos/{name}/issues?state=all&since={stamp}")
+        except ApiError:
+            # Issues turned off answers 410 here; pull requests still have their own
+            # listing (no `since`, so filter on updated_at).
+            pulls = read("pull requests", f"/repos/{name}/pulls?state=all&sort=updated&direction=desc")
+            threads = [dict(p, pull_request={}) for p in pulls if _after(p.get("updated_at"), since)]
+        for item in threads:
             kind = "pull request" if "pull_request" in item else "issue"
             check(name, kind, item, (item.get("title"), item.get("body")))
             if kind == "pull request":

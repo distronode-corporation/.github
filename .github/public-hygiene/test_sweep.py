@@ -150,8 +150,8 @@ class Sweep(unittest.TestCase):
         original = gh.get_all
 
         def get_all(path: str) -> list[Any]:
-            if path.startswith("/repos/octo/noissues/issues?"):
-                raise event.ApiError("GET /repos/octo/noissues/issues: HTTP 410")
+            if path.startswith(("/repos/octo/noissues/issues?", "/repos/octo/noissues/pulls?")):
+                raise event.ApiError("GET /repos/octo/noissues/x: HTTP 503")
             if path.startswith("/repos/octo/noissues/"):
                 return []
             return original(path)
@@ -161,10 +161,34 @@ class Sweep(unittest.TestCase):
         status, log = run(ENV, gh, gl)
         self.assertEqual(status, 1)
         body = gl.notes[0][1]["body"]
-        self.assertIn("octo/noissues: issues and pull requests", body)
+        self.assertIn("octo/noissues: pull requests", body)
         self.assertIn(f"{HTML}/pull/7", body)  # the next repository was still read
         self.assertIn("1 part(s) could not be read", log)
         self.assertNotIn("noissues", log)
+
+    def test_issues_turned_off_falls_back_to_the_pull_request_listing(self) -> None:
+        gh = FakeGitHub()
+        pulls = [
+            {"number": 3, "title": "New", "body": f"from {BAD_IP}", "updated_at": RECENT, "user": user(), "html_url": "https://github.com/octo/prs/pull/3"},
+            {"number": 2, "title": "Old", "body": f"from {BAD_IP}", "updated_at": OLD, "user": user(), "html_url": "https://github.com/octo/prs/pull/2"},
+        ]
+
+        def get_all(path: str) -> list[Any]:
+            if path.startswith("/repos/octo/prs/issues?"):
+                raise event.ApiError("GET /repos/octo/prs/issues: HTTP 410")
+            if path == "/repos/octo/prs/pulls?state=all&sort=updated&direction=desc":
+                return pulls
+            if path == "/orgs/octo/repos?type=public":
+                return [{"full_name": "octo/prs"}]
+            return []
+
+        gh.get_all = get_all  # type: ignore[method-assign]
+        gl = FakeGitLab()
+        status, _ = run(ENV, gh, gl)
+        self.assertEqual(status, 0)
+        body = gl.notes[0][1]["body"]
+        self.assertIn("pull request: https://github.com/octo/prs/pull/3", body)
+        self.assertNotIn("/pull/2", body)
 
     def test_ids_must_be_numeric(self) -> None:
         with self.assertRaises(event.ApiError):
