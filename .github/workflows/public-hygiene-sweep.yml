@@ -1,0 +1,76 @@
+name: Public hygiene sweep
+
+# Weekly: every public repository's issue, pull request, review, comment, discussion and
+# release text from the last 8 days, and the earlier revisions of recent issues and pull
+# requests, checked with the same rules as the per-thread check, reported to a
+# confidential GitLab issue. It catches what the per-thread check cannot: earlier
+# revisions still present, threads in a repository without the caller, failed runs.
+#
+# OFF until the organization turns it on. The job runs only when the variable
+# PUBLIC_HYGIENE_SWEEP is `on`. Turning it on takes, in this repository's settings: an
+# environment named `public-hygiene-sweep` (deployment branches: `main` only) holding the
+# three secrets below as environment secrets, and the variable (repository or
+# organization level):
+#
+#   secret    PUBLIC_HYGIENE_GITLAB_TOKEN    a GitLab project access token: role Reporter,
+#                                            scope `api` (notes need it), with an expiry
+#                                            date, on a DEDICATED private project that
+#                                            holds only the report issue. `api` on a
+#                                            project reads all of it, so never put the
+#                                            token on a project with code or other issues.
+#   secret    PUBLIC_HYGIENE_GITLAB_PROJECT  that project's numeric id
+#   secret    PUBLIC_HYGIENE_GITLAB_ISSUE    the iid of a CONFIDENTIAL issue there; the
+#                                            sweep checks it is confidential before
+#                                            every post and refuses otherwise
+#   variable  PUBLIC_HYGIENE_SWEEP           `on`
+#
+# The sweep also reads the organization secret PUBLIC_HYGIENE_DENYLIST_KEY (the
+# `internal-name` rule's key); without it that rule is skipped and the report says so.
+#
+# The two ids are secrets rather than variables because a step's env is printed in its
+# public log and only secrets are masked there; this file names no private project. The
+# log shows counts only; item links and rule ids go to the GitLab issue alone, and the
+# matched text goes nowhere.
+#
+# GitHub turns a public repository's schedules off after 60 days without activity. The
+# report says so from day 45; re-enable the workflow from the Actions tab if it stops.
+on:
+  schedule:
+    - cron: '41 7 * * 1' # Monday 07:41 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: public-hygiene-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: sweep
+    if: vars.PUBLIC_HYGIENE_SWEEP == 'on'
+    # The secrets live in this environment, which only `main` can deploy to.
+    environment: public-hygiene-sweep
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # check out the checker; every repository read is public data
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/public-hygiene
+
+      - name: Self-test the rules
+        env:
+          PUBLIC_HYGIENE_SKIP_SLOW: "1" # the timing test runs in this repository's own CI
+        run: python3 -I -B -m unittest discover -s .github/public-hygiene -t .github/public-hygiene
+
+      - name: Sweep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITLAB_TOKEN: ${{ secrets.PUBLIC_HYGIENE_GITLAB_TOKEN }}
+          GITLAB_PROJECT: ${{ secrets.PUBLIC_HYGIENE_GITLAB_PROJECT }}
+          GITLAB_ISSUE: ${{ secrets.PUBLIC_HYGIENE_GITLAB_ISSUE }}
+          PUBLIC_HYGIENE_DENYLIST_KEY: ${{ secrets.PUBLIC_HYGIENE_DENYLIST_KEY }}
+        run: python3 -I -B .github/public-hygiene/sweep.py
