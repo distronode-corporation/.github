@@ -90,7 +90,6 @@ EDITORS_QUERY = """
 query($ids: [ID!]!) { nodes(ids: $ids) { ... on Comment { id editor { login __typename } } } }
 """
 
-CALLER_PIN = re.compile(r"public-hygiene\.yml@([0-9a-f]{40})")
 COMMENT_KINDS = ("comment", "review", "review comment", "discussion comment")
 
 
@@ -114,8 +113,9 @@ def _edited_by_person(item: dict[str, Any]) -> bool:
 
 
 def caller_pin(api: Api, org: str, repo: str) -> str | None:
-    """None when the repository's caller pins a commit on the shared repository's main,
-    else what is wrong. Runs from main's code, so an impostor pin cannot vouch for itself."""
+    """None when the repository's caller pins a commit on the shared repository's main and
+    names it by its tag, else what is wrong. Runs from main's code, so an impostor pin
+    cannot vouch for itself."""
     path = "public-text.yml" if repo == f"{org}/.github" else "public-hygiene.yml"
     try:
         content = api.get(f"/repos/{repo}/contents/.github/workflows/{path}") or {}
@@ -127,11 +127,8 @@ def caller_pin(api: Api, org: str, repo: str) -> str | None:
         text = base64.b64decode(str(content.get("content") or "")).decode("utf-8", "replace")
     except (ValueError, TypeError):
         return "the caller workflow could not be read"
-    m = CALLER_PIN.search(text)
-    if not m:
-        return "the caller pins no commit"
-    ok, _message = pin.check(api, f"{org}/.github", m.group(1))
-    return None if ok else "the caller's pin is not a commit on the shared repository's main"
+    problems = pin.check_caller(api, f"{org}/.github", text)
+    return "; ".join(problems) if problems else None
 
 
 def collect(api: Api, org: str, since: dt.datetime) -> tuple[list[Hit], int, list[str]]:

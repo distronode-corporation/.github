@@ -25,7 +25,8 @@ name: Public hygiene
 #   default branch one thread's green run replaces another's red one under this name. If
 #   the check is ever made required, derive it from pull-request-scoped events, or write
 #   a commit status from these runs (that needs `statuses: write`).
-# - `pin`: fails unless the caller's pin is a commit on this repository's main. It runs
+# - `pin`: fails unless the caller's pin is a commit on this repository's main, and the
+#   comment after it is exactly `# <tag>` for a v* tag on that commit. It runs
 #   the pinned commit's own code, so it catches a pin left on an unmerged commit, not an
 #   impostor commit (which could skip it). The weekly sweep, which runs from main,
 #   checks every caller's pin for that; a reviewer still checks pins by hand.
@@ -102,9 +103,14 @@ jobs:
           persist-credentials: false
           sparse-checkout: .github/public-hygiene
 
-      - name: The pin is a commit on main
+      # The caller's own file is read through the API at the caller's commit (never
+      # checked out or run) to check the comment after the pin.
+      - name: The pin is a commit on main, named by its tag
         env:
           GH_TOKEN: ${{ github.token }}
           WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
           WORKFLOW_SHA: ${{ job.workflow_sha }}
+          CALLER_REPOSITORY: ${{ github.repository }}
+          CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+          CALLER_SHA: ${{ github.sha }}
         run: python3 -I -B .github/public-hygiene/pin.py

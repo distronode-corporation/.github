@@ -92,11 +92,15 @@ class FakeGitHub:
             return [{"commit": {"committer": {"date": self.commit_date}}}]
         if path == "/repos/octo/.github":
             return {"default_branch": "main"}
+        if path == "/repos/octo/.github/git/ref/tags/v1.0.0":
+            return {"object": {"type": "commit", "sha": PIN_SHA}}
+        if path.startswith("/repos/octo/.github/git/ref/tags/"):
+            raise event.ApiError("GET x: HTTP 404", 404)
         if path.startswith("/repos/octo/.github/compare/main..."):
             return {"status": self.pin_status}
         m = re.fullmatch(r"/repos/(octo/[\w.\-]+)/contents/\.github/workflows/[\w.\-]+\.yml", path)
         assert m, path
-        text = self.callers.get(m.group(1), f"uses: octo/.github/.github/workflows/public-hygiene.yml@{PIN_SHA} # x")
+        text = self.callers.get(m.group(1), f"uses: octo/.github/.github/workflows/public-hygiene.yml@{PIN_SHA} # v1.0.0")
         if text is None:
             raise event.ApiError("GET x: HTTP 404", 404)
         return {"content": base64.b64encode(text.encode()).decode()}
@@ -200,7 +204,13 @@ class Sweep(unittest.TestCase):
         gh, gl = FakeGitHub(), FakeGitLab()
         gh.callers["octo/app"] = "uses: octo/.github/.github/workflows/public-hygiene.yml@main"
         run(ENV, gh, gl)
-        self.assertIn("octo/app: caller pin (the caller pins no commit)", gl.notes[0][1]["body"])
+        self.assertIn("octo/app: caller pin (The caller pins no commit of the shared workflow.)", gl.notes[0][1]["body"])
+        for comment in ("# main", "# .github main at the merge of #9", "# v9.9.9"):
+            gh, gl = FakeGitHub(), FakeGitLab()
+            gh.callers["octo/app"] = f"uses: octo/.github/.github/workflows/public-hygiene.yml@{PIN_SHA} {comment}"
+            status, _ = run(ENV, gh, gl)
+            self.assertEqual(status, 1, comment)
+            self.assertIn("octo/app: caller pin (", gl.notes[0][1]["body"])
 
     def test_more_revisions_than_read_is_unreadable(self) -> None:
         # F5
