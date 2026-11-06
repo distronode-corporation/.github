@@ -53,9 +53,14 @@ Documented exceptions (the allowlist), each next to the rule it narrows:
   versions (single-digit parts, a version word or operator before, a build suffix after).
 - `token`: test-fixture shapes (one repeated character, the AWS documentation key),
   placeholders (`YOUR_API_KEY_HERE`, `yourtokenhere`, `CHANGE_ME`, templates such as
-  `${X}`, `{{ x }}` and `%(x)s`, `<your-token>`, `****` masks), and code references
+  `${X}`, `{{ x }}` and `%(x)s`, `<your-token>`, `****` masks), variables (`$NAME`,
+  `$dbPassword2`, PowerShell's `$DbPassword2`, `%NAME%`), and code references
   (`secrets.NAME`, `process.env.NAME`, `os.environ[`, `os.getenv(`). A placeholder word
-  inside a value that keeps four or more other letters is still a value.
+  inside a value that keeps four or more other letters is still a value. A quoted value
+  with spaces is a value only when its words that are not prose hold a secret's shape.
+  The same tests apply to every key form: assignments, a flag and its value, YAML block
+  scalars, triple-quoted strings, PHP's `define` and PowerShell's
+  `ConvertTo-SecureString ... -AsPlainText`.
 - `private-path`: placeholder home directories and an app's own cache directory.
 - `secret-name-*`: the names every workflow uses, browser-public names, error codes, and
   names listed as an `.env.example` file's contents.
