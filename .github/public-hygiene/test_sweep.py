@@ -225,6 +225,24 @@ class Sweep(unittest.TestCase):
         self.assertIn("octo/app: comments of discussion #4", body)
         self.assertIn("octo/app: replies in discussion #4", body)
 
+    def test_an_outside_authors_revisions_are_checked_for_credentials_only(self) -> None:
+        # Earlier revisions follow the description's author rules (an outside author:
+        # credentials only).
+        gh = FakeGitHub()
+        outsider = {"number": 10, "title": "Bug", "body": "clean", "user": user("reporter"), "author_association": "NONE", "html_url": f"{HTML}/issues/10"}
+        gh.data["/repos/octo/app/issues?state=all&since=2026-11-01T07:00:00Z"].append(outsider)
+        token = "gh" + "p_" + "".join("abcdefghij0123456789"[(i * 7) % 20] for i in range(36))
+        gh.edits[10] = {"body": "clean", "userContentEdits": {"totalCount": 2, "nodes": [{"diff": "clean"}, {"diff": f"crash from {BAD_IP}"}]}}
+        gl = FakeGitLab()
+        run(ENV, gh, gl)
+        self.assertNotIn(f"{HTML}/issues/10", gl.notes[0][1]["body"])  # an address: theirs to share
+        gh.edits[10]["userContentEdits"]["nodes"].append({"diff": f"token {token}"})
+        gh.edits[10]["userContentEdits"]["totalCount"] = 3
+        gl = FakeGitLab()
+        run(ENV, gh, gl)
+        self.assertIn(f"1 earlier revision(s) of a issue: {HTML}/issues/10 | `token`", gl.notes[0][1]["body"])
+        self.assertNotIn(token, gl.notes[0][1]["body"])
+
     def test_a_person_edit_to_a_bot_comment_is_checked(self) -> None:
         # F3 in the sweep.
         gh = FakeGitHub()
