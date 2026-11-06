@@ -164,7 +164,8 @@ TOKEN_PATTERNS = (
     _c(r"(?<![\w-])[a-z][a-z0-9+.\-]*://[^\s/:@]+:[^\s/@]{6,}@[\w.\-]+", IC),
     # `password = value` and friends, with a value that is not a placeholder.
     _c(
-        r"(?<![\w-])(?:password|passwd|secret|api[_\-]?key|access[_\-]?token|auth[_\-]?token)"
+        # Prefixed names and flags count too: `DB_PASSWORD=`, `CLIENT_SECRET:`, `--password=`.
+        r"(?<![\w])(?:-{1,2})?(?:[A-Za-z0-9]+[_\-])*(?:password|passwd|secret|api[_\-]?key|access[_\-]?token|auth[_\-]?token)"
         r"\s*[:=]\s*['\"]?[A-Za-z0-9_\-+/=.]{12,}",
         IC,
     ),
@@ -389,7 +390,9 @@ IPV4 = _c(r"(?<![\w.])((?:\d{1,3}\.){3}\d{1,3})(/\d{1,2})?(?![\w]|\.\d)")
 IPV6 = _c(r"(?<![\w:])((?:[0-9a-fA-F]{1,4}:){1,7}(?::|(?::[0-9a-fA-F]{1,4}){1,6}|[0-9a-fA-F]{1,4}))(/\d{1,3})?(?![\w:])")
 VERSION_CONTEXT = _c(
     r"(?:\bv|\bversion\s*:?\s*|\bver\.?\s*|\brelease\s+|\bbuild\s+|\bmsix\s+|\bpackage\s+|\bpolicy\s+|\bsection\s+|"
-    r"[@=<>~^\u2192]\s*|->\s*|\bbump(?:s|ed)?\s+)$",
+    # Version operators only: a bare `@` or `=` is also how a host is written
+    # (`user@host`, `HOST=addr`, `--server=addr`).
+    r"(?:==|>=|<=|~=|!=|\^|~|\u2192|->)\s*|\bbump(?:s|ed)?\s+)$",
     IC,
 )
 DOC_NETS = tuple(

@@ -52,6 +52,9 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "https://deploy:" + fake("", 12) + "@registry.example.org/x",
             "password=" + "Hunter2" + "Hunter9xyz",
             "api_key: " + fake("", 20),
+            "DB_" + "PASSWORD=" + "Hunter2" + "Hunter9xyz",
+            "--pass" + "word=" + "Hunter2" + "Hunter9xyz",
+            "CLIENT_" + "SECRET: " + fake("", 24),
         ],
         [
             "gh" + "p_" + "x" * 36,  # one repeated character: a fixture
@@ -194,6 +197,9 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "the origin at 34.120.7.9",
             "trusts the pod CIDR 10.42.0.0/16",
             "egress from 192.168.4.20",
+            "ssh deploy@34.120.7.9",
+            "HOST=34.120.7.9",
+            "--server=34.120.7.9",
             "v6 2600:1f18:abcd::1 answers",
         ],
         [
@@ -208,6 +214,7 @@ CASES: dict[str, tuple[list[str], list[str]]] = {
             "at 12:30:45 UTC",
             "allow 0.0.0.0/0",
             "moves from 0.4.9.1 to 0.4.9.2",
+            "requires lib==4.2.1.3",
             "999.10.10.10 is not an address",
             "it ships as 3.0.12.0",
             "2a::b::c is not an address",
