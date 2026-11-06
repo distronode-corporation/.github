@@ -46,7 +46,7 @@ jobs:
       issues: write # read the thread; keep the one comment on an issue or pull request
       pull-requests: write # reviews, review comments and commits; the one comment on a pull request
       discussions: write # read a discussion; keep the one comment on it
-    uses: distronode-corporation/.github/.github/workflows/public-hygiene.yml@554638896236a5b7dd540e8cdf7d82b1c2428b12 # public-hygiene branch; re-pinned to main after the merge
+    uses: distronode-corporation/.github/.github/workflows/public-hygiene.yml@de540c5ab44b917f0750b44ee7a0d5c87be34b66 # public-hygiene branch; re-pinned to main after the merge
     # The one secret the check uses, mapped by name (never `inherit`). Empty on a fork's
     # pull request; the check then skips only its `internal-name` rule.
     secrets:
