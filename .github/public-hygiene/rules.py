@@ -51,8 +51,11 @@ Documented exceptions (the allowlist), each next to the rule it narrows:
   run id in a link is not a finding.
 - `ip-address`: loopback, the documentation ranges, the public resolvers, and four-part
   versions (single-digit parts, a version word or operator before, a build suffix after).
-- `token`: test-fixture shapes (one repeated character, the AWS documentation key) and
-  placeholders (`YOUR_API_KEY_HERE`, variables, angle brackets).
+- `token`: test-fixture shapes (one repeated character, the AWS documentation key),
+  placeholders (`YOUR_API_KEY_HERE`, `yourtokenhere`, `CHANGE_ME`, templates such as
+  `${X}`, `{{ x }}` and `%(x)s`, `<your-token>`, `****` masks), and code references
+  (`secrets.NAME`, `process.env.NAME`, `os.environ[`, `os.getenv(`). A placeholder word
+  inside a value that keeps four or more other letters is still a value.
 - `private-path`: placeholder home directories and an app's own cache directory.
 - `secret-name-*`: the names every workflow uses, browser-public names, error codes, and
   names listed as an `.env.example` file's contents.
@@ -213,16 +216,29 @@ TOKEN_PATTERNS = (
     _c(
         r"(?<![\w-])(?:-{1,2})?(?:[A-Za-z0-9]+[_\-]){0,4}"
         r"(?:password|passwd|pwd|pw|secret|token|api[_\-]?key|api[_\-]?token|access[_\-]?token|auth[_\-]?token)"
-        r"(?:[_\-](?:access[_\-])?key)?['\"]?\s*+[:=]\s*+['\"`]?[^\s'\"`,;)<>]{8,200}",
+        r"(?:[_\-](?:access[_\-])?key)?['\"]?\s*+(?::=|=>|[:=])\s*+['\"`]?[^\s'\"`,;)<>]{8,200}",
         IC,
+    ),
+    # The same with a camelCase key (`clientSecret`, `dbPassword`, `refreshToken`,
+    # `secretKey`, `privateKey`), case-sensitive so that `publicKey` and `monkey` are not
+    # keys. Go's `:=` and PHP's `=>` count as delimiters in both.
+    _c(
+        r"(?<![\w$-])(?:[a-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3}(?:Secret|Password|Passwd|Pwd|Token)"
+        r"|(?:[a-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3})?(?:[Ss]ecret|[Pp]rivate|[Aa]ccess|[Ss]igning|[Aa]pi|[Ee]ncryption|[Mm]aster)Key)"
+        r"(?![a-z])['\"]?\s*+(?::=|=>|[:=])\s*+['\"`]?[^\s'\"`,;)<>]{8,200}"
     ),
     # A password written in prose: `the password is ...`.
     _c(r"\bpassword\s++(?:is|was)\s++['\"`]?[^\s'\"`,;)<>]{8,200}", IC),
 )
 
-ASSIGNMENT_VALUE = _c(r"(?:[:=]|\bis|\bwas|\bBearer|\btoken)\s*+['\"`]?([^\s'\"`,;)<>]{8,200})$", IC)
+ASSIGNMENT_VALUE = _c(r"(?::=|=>|[:=]|\bis|\bwas|\bBearer|\btoken)\s*+['\"`]?([^\s'\"`,;)<>]{8,200})$", IC)
 URL_PASSWORD = _c(r"://[^\s/:@]*:([^\s/@]+)@")
-PLACEHOLDER_CHARS = _c(r"[$<>{}%*]")
+# a template or a mask, not a character a real password may hold:
+# `${X}`, `$(cmd)`, `{{ x }}`, `{% x %}`, `{name}`, `%(x)s`, a whole `$NAME`, `%NAME%`, `<your-token>`,
+# `***`. A lone `$ % * { }` is a password character, and `%2B` is URL encoding.
+PLACEHOLDER_SHAPE = _c(
+    r"\$[{(]|\{[{%]|\{[A-Za-z_][\w.\-]*\}|%\(|^\$(?:[A-Z_][A-Z0-9_]*|[a-z_][a-z0-9_]*)$|%[A-Z_][A-Z0-9_]{2,}%|^%[a-z_][a-z0-9_]*%$|<[^<>]+>|\*{3,}"
+)
 PLACEHOLDER_WORDS = frozenset(
     {"password", "passwd", "pass", "secret", "changeme", "example", "redacted", "hunter2", "token", "xxxxxx"}
 )
@@ -231,21 +247,66 @@ PLACEHOLDER_WORDS = frozenset(
 PLACEHOLDER_WORDS_IN_VALUE = frozenset(
     {"your", "here", "example", "placeholder", "sample", "dummy", "redacted", "changeme", "todo", "fixme", "insert", "replace"}
 )
+# words that fill a placeholder out without making it a value.
+PLACEHOLDER_FILLER = frozenset(
+    {"api", "key", "keys", "token", "secret", "password", "pass", "pwd", "access", "auth", "client", "id", "app",
+     "account", "my", "me", "a", "an", "the", "to", "with", "real", "actual", "own", "goes", "put", "paste",
+     "enter", "value", "new", "it"}
+)
+_SEGMENTS = PLACEHOLDER_WORDS_IN_VALUE | PLACEHOLDER_FILLER
+_SEGMENT_MAX = max(map(len, _SEGMENTS))
+CHANGE_ME = _c(r"(?<![a-z])change[_\-]?(?:me|it)(?![a-z])", IC)
 VALUE_WORD = _c(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
-# A reference to where the value comes from, not the value: a workflow expression
-# (`secrets.NAME`), or code (`process.env.NAME`, `import.meta.env.NAME`, `os.environ`,
-# `os.getenv`). Up to three dotted parts may come first, and the reference word must be
-# followed by an access (`.`, `[`, `(`) or end the value: `Github@...` is a value.
-TEMPLATE_PREFIX = _c(r"(?:[A-Za-z_$][\w$]{0,30}\.){0,3}(?:secrets|vars|env|inputs|steps|github|environ|getenv)(?=[.\[(]|$)", IC)
+# the reference words as code spells them (case-sensitive), each
+# followed by an access to a name (`.NAME`, `.name`) or a call or index that ends the value
+# (`os.environ[`, `os.getenv(`), so `Github.Prod2041` and `Github(2041)` are values.
+_NAME_AFTER = r"(?:[a-z_]|[A-Z][A-Z0-9_]*+(?![a-z]))"
+TEMPLATE_PREFIX = _c(
+    r"(?:[A-Za-z_$][\w$]{0,30}\.){0,3}"
+    r"(?:(?:secrets|vars|env|inputs|steps|needs|github|environ|getenv)(?=\." + _NAME_AFTER + r"|[(\[](?:$|" + _NAME_AFTER + r"))"
+    r"|ENV(?=\[|\.fetch\()|Getenv(?=\())"
+    # A secret store's path rather than the secret (`vault:secret/data/app#key`).
+    r"|^vault:(?=[a-z][\w\-]*/)"
+)
+
+
+def _split(word: str) -> list[str] | None:
+    """`word` cut wholly into _SEGMENTS (`yourtokenhere` -> your, token, here), or None."""
+    back: list[int | None] = [0] + [None] * len(word)
+    for i in range(1, len(word) + 1):
+        for j in range(max(0, i - _SEGMENT_MAX), i):
+            if back[j] is not None and word[j:i] in _SEGMENTS:
+                back[i] = j
+                break
+    if back[-1] is None:
+        return None
+    parts, i = [], len(word)
+    while i:
+        j = back[i]
+        parts.append(word[j:i])
+        i = j
+    return parts
 
 
 def _is_placeholder_value(value: str) -> bool:
-    if TEMPLATE_PREFIX.match(value) or PLACEHOLDER_CHARS.search(value):
+    if TEMPLATE_PREFIX.match(value) or PLACEHOLDER_SHAPE.search(value) or CHANGE_ME.search(value):
         return True
-    words = [w.lower() for w in VALUE_WORD.findall(value)]
-    if any(w in PLACEHOLDER_WORDS_IN_VALUE for w in words):
-        return True
-    return any(len(w) >= 4 and set(w) == {"x"} for w in words)  # `xxxx`, `XXXXXXXX`
+    # A placeholder word marks a placeholder only when what is left, besides filler words
+    # and digits, is too short to be a secret: `Sample42Lq9vZ` keeps `Lq`, `v`, `Z`.
+    marked, residue = False, 0
+    for w in VALUE_WORD.findall(value):
+        w = w.lower()
+        if w.isdigit():
+            continue
+        if len(w) >= 4 and set(w) == {"x"}:  # `xxxx`, `XXXXXXXX`
+            marked = True
+            continue
+        parts = _split(w)
+        if parts is None:
+            residue += len(w)
+        else:
+            marked = marked or any(p in PLACEHOLDER_WORDS_IN_VALUE for p in parts)
+    return marked and residue < 4
 
 
 def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
@@ -258,7 +319,7 @@ def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
     if userinfo:
         # `postgres://user:password@localhost` and `://u:${PASS}@h` are documentation.
         secret = userinfo.group(1)
-        return not (PLACEHOLDER_CHARS.search(secret) or secret.lower() in PLACEHOLDER_WORDS or len(set(secret)) < 6)
+        return not (PLACEHOLDER_SHAPE.search(secret) or secret.lower() in PLACEHOLDER_WORDS or len(set(secret)) < 6)
     assignment = ASSIGNMENT_VALUE.search(found)
     if assignment:
         # `password: Simulator.app` is prose; a value with no digit is a word, not a secret.
