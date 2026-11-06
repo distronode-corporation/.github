@@ -106,10 +106,15 @@ PUBLIC_GITLAB_PROJECTS = frozenset(
 COMPANY_DOMAINS = ("distronode.com", "distronode.ca")
 PUBLIC_ADDRESSES = frozenset({"opensource@distronode.com"})
 
-# Authors whose text is generated from public upstream content (release notes, changelogs)
-# and is skipped. Matched on login AND account type, so a user named like a bot is still
-# scanned. Every other bot is scanned like a person.
-SKIPPED_BOTS = frozenset({"dependabot[bot]", "renovate[bot]"})
+# Authors whose text is skipped. Matched on login AND account type, so a user named like a
+# bot is still scanned. Every other bot is scanned like a person.
+# - Upstream bots: their text is generated from public upstream content.
+# - Code review bots: they quote the pull request's own public diff, and on a change to
+#   these rules that means quoting the planted examples; nobody here can edit their
+#   comments either.
+UPSTREAM_BOTS = frozenset({"dependabot[bot]", "renovate[bot]"})
+REVIEW_BOTS = frozenset({"sentry[bot]", "seer-by-sentry[bot]", "Copilot", "copilot-pull-request-reviewer[bot]"})
+SKIPPED_BOTS = UPSTREAM_BOTS | REVIEW_BOTS
 
 # The scan's ceiling, in characters after normalization. A release body may hold 125,000.
 MAX_SCAN_CHARS = 150_000

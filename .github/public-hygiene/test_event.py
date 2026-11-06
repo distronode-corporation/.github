@@ -252,6 +252,16 @@ class PullRequestEvents(Runner):
         status, _ = self.run_event("pull_request", pr_payload(), FakeApi(comments=[bot]))
         self.assertEqual(status, 1)
 
+    def test_review_bots_are_skipped_but_people_replying_are_not(self) -> None:
+        seer = {"id": 21, "body": f"e.g. `user@{BAD_IP}`", "user": user("sentry[bot]", "Bot"), "html_url": f"{HTML}/pull/7#discussion_r21"}
+        copilot = {"id": 22, "body": f"see {BAD_PATH}", "user": user("Copilot", "Bot"), "html_url": f"{HTML}/pull/7#discussion_r22"}
+        status, _ = self.run_event("pull_request", pr_payload(), FakeApi(review_comments=[seer, copilot]))
+        self.assertEqual(status, 0)
+        reply = {"id": 23, "body": f"fixed for {BAD_IP}", "user": user(), "author_association": "MEMBER", "html_url": f"{HTML}/pull/7#discussion_r23"}
+        status, log = self.run_event("pull_request", pr_payload(), FakeApi(review_comments=[seer, copilot, reply]))
+        self.assertEqual(status, 1)
+        self.assertEqual(log.count("Finding in a review comment"), 1)
+
     def test_a_hidden_comment_is_skipped(self) -> None:
         hidden = {"id": 9, "node_id": "IC_9", "body": f"from {BAD_IP}", "minimized": {"reason": "spam"}, "user": user(), "html_url": f"{HTML}/pull/7#issuecomment-9"}
         status, _ = self.run_event("pull_request", pr_payload(), FakeApi(comments=[hidden]))

@@ -454,11 +454,11 @@ class RuleCases(unittest.TestCase):
         self.assertEqual(rules.scan(""), [])
         self.assertEqual(rules.rule_ids(None, ""), [])
 
-    def test_skipped_authors_are_upstream_bots_only(self) -> None:
-        self.assertTrue(rules.is_skipped_author("dependabot[bot]", "Bot"))
-        self.assertTrue(rules.is_skipped_author("renovate[bot]", "Bot"))
-        self.assertFalse(rules.is_skipped_author("dependabot[bot]", "User"))
-        for bot in ("github-actions[bot]", "sentry[bot]", "Copilot"):
+    def test_skipped_authors_are_upstream_and_review_bots_only(self) -> None:
+        for bot in ("dependabot[bot]", "renovate[bot]", "sentry[bot]", "seer-by-sentry[bot]", "Copilot", "copilot-pull-request-reviewer[bot]"):
+            self.assertTrue(rules.is_skipped_author(bot, "Bot"), bot)
+            self.assertFalse(rules.is_skipped_author(bot, "User"), bot)  # a person named like a bot
+        for bot in ("github-actions[bot]", "some-ci[bot]"):
             self.assertFalse(rules.is_skipped_author(bot, "Bot"), bot)
         self.assertFalse(rules.is_skipped_author(None, None))
 

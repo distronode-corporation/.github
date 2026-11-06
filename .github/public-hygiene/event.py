@@ -32,8 +32,8 @@ Writing the comment needs `issues: write` (issues and pull requests) or
 `discussions: write`. A fork's pull request runs with a read-only token, so there the
 comment is skipped with a warning and the failed check is the signal.
 
-Authors: text by Dependabot and Renovate is skipped (rules.SKIPPED_BOTS), unless a person
-edited it in this event. An author outside the organization (no write access, not a bot)
+Authors: text by Dependabot and Renovate and by the code review bots (Seer, Copilot) is
+skipped (rules.SKIPPED_BOTS), unless a person edited it in this event. An author outside the organization (no write access, not a bot)
 is checked for credentials only (rules.scan, `outside=True`). Everyone else, every other
 bot included, is checked against every rule. A minimized (hidden) comment is skipped.
 """
@@ -206,8 +206,8 @@ class Target:
 def _user(item: dict[str, Any]) -> tuple[str | None, str | None]:
     user = item.get("user") or item.get("author") or {}
     login, kind = user.get("login"), user.get("type") or user.get("__typename")
-    if kind == "Bot" and login and not login.endswith("[bot]"):
-        login += "[bot]"  # GraphQL names a bot without the suffix REST uses
+    if "type" not in user and kind == "Bot" and login and not login.endswith("[bot]"):
+        login += "[bot]"  # GraphQL names an app bot without the suffix REST uses
     return login, kind
 
 
