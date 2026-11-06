@@ -80,6 +80,10 @@ query($owner: String!, $name: String!) {
 """
 
 
+class _Skip(Exception):
+    """An item whose revisions are not checked (its author is a skipped bot)."""
+
+
 @dataclass(frozen=True)
 class Hit:
     repo: str
@@ -145,16 +149,26 @@ def collect(api: Api, org: str, since: dt.datetime) -> tuple[list[Hit], int, lis
             if kind == "pull request":
                 for review in read(f"reviews of #{number}", f"/repos/{name}/pulls/{number}/reviews"):
                     check(name, "review", review, (review.get("body"),))
-            # Earlier revisions of the description: GitHub keeps every one public.
+            # Earlier revisions of the description: GitHub keeps every one public. They are
+            # held to the same author rules as the description itself.
+            login, account_type = _user(item)
+            skipped = rules.is_skipped_author(login, account_type)
+            outside = rules.is_outside_author(_assoc(item), account_type)
             try:
+                if skipped:
+                    raise _Skip
                 data = api.graphql(EDITS_QUERY, {"owner": owner, "name": short, "number": number})
                 node = (data.get("repository") or {}).get("issueOrPullRequest") or {}
                 edits = (node.get("userContentEdits") or {}).get("nodes") or []
                 current = node.get("body") or ""
-                flagged = sum(1 for e in edits[:MAX_EDITS] if e.get("diff") and e["diff"] != current and rules.rule_ids(e["diff"]))
+                earlier = [e["diff"] for e in edits[:MAX_EDITS] if e.get("diff") and e["diff"] != current]
+                found = [rules.rule_ids(d, outside=outside) for d in earlier]
+                flagged = sum(1 for ids in found if ids)
                 if flagged:
-                    ids = tuple(sorted({i for e in edits[:MAX_EDITS] if e.get("diff") and e["diff"] != current for i in rules.rule_ids(e["diff"])}))
+                    ids = tuple(sorted({i for f in found for i in f}))
                     hits.append(Hit(name, f"{flagged} earlier revision(s) of a {kind}", str(item.get("html_url") or ""), ids))
+            except _Skip:
+                pass
             except ApiError:
                 unreadable.append(f"{name}: revisions of #{number}")
         for c in read("comments", f"/repos/{name}/issues/comments?since={stamp}"):

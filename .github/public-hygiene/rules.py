@@ -196,7 +196,7 @@ TOKEN_PATTERNS = (
     _c(r"\bBearer\s++[A-Za-z0-9._~+/\-]{20,}=*", IC),
     _c(r"\bauth\s++token\s*+[:=]?\s*+[0-9a-f]{32}\b", IC),
     # A password in a URL's user info.
-    _c(r"(?<![\w+.\-])[a-z][a-z0-9+.\-]{0,30}://[^\s/:@]{1,100}:[^\s/@]{6,200}@[\w.\-]+", IC),
+    _c(r"(?<![\w+.\-])[a-z][a-z0-9+.\-]{0,30}://[^\s/:@]{0,100}:[^\s/@]{6,200}@[\w.\-]+", IC),
     # `password = value` and friends. Prefixed names and flags count too (`DB_PASSWORD=`,
     # `CLIENT_SECRET:`, `--password=`), with a key suffix (`SECRET_KEY`) and a quoted key
     # (`"password":`). The lookbehind refuses a start after a hyphen and the prefix is
@@ -212,7 +212,7 @@ TOKEN_PATTERNS = (
 )
 
 ASSIGNMENT_VALUE = _c(r"(?:[:=]|\bis|\bwas|\bBearer|\btoken)\s*+['\"`]?([^\s'\"`,;)<>]{8,200})$", IC)
-URL_PASSWORD = _c(r"://[^\s/:@]+:([^\s/@]+)@")
+URL_PASSWORD = _c(r"://[^\s/:@]*:([^\s/@]+)@")
 PLACEHOLDER_CHARS = _c(r"[$<>{}%*]")
 PLACEHOLDER_WORDS = frozenset(
     {"password", "passwd", "pass", "secret", "changeme", "example", "redacted", "hunter2", "token", "xxxxxx"}

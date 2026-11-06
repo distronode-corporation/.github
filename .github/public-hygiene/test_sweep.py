@@ -71,7 +71,12 @@ class FakeGitHub:
             {"title": "Old", "body": f"from {BAD_IP}", "url": f"{HTML}/discussions/3", "updatedAt": OLD, "authorAssociation": "MEMBER", "author": {"login": "pat", "__typename": "User"}, "comments": {"nodes": []}},
         ]
         # Issue 9 is clean now, but an earlier revision of it is not.
-        self.edits = {9: {"body": "clean", "userContentEdits": {"totalCount": 2, "nodes": [{"diff": "clean"}, {"diff": f"from {BAD_IP}"}]}}}
+        self.edits = {
+            9: {"body": "clean", "userContentEdits": {"totalCount": 2, "nodes": [{"diff": "clean"}, {"diff": f"from {BAD_IP}"}]}},
+            # Dependabot's description: its revisions are skipped like the description.
+            8: {"body": "clean", "userContentEdits": {"totalCount": 2, "nodes": [{"diff": "clean"}, {"diff": f"from {BAD_IP}"}]}},
+        }
+        self.graphql_numbers: list[int] = []
 
     def get(self, path: str) -> Any:
         assert path == "/repos/octo/.github/commits?per_page=1", path
@@ -83,6 +88,7 @@ class FakeGitHub:
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         if "issueOrPullRequest" in query:
+            self.graphql_numbers.append(variables["number"])
             return {"repository": {"issueOrPullRequest": self.edits.get(variables["number"], {})}}
         return {"repository": {"discussions": {"nodes": self.discussions}}}
 
@@ -136,6 +142,8 @@ class Sweep(unittest.TestCase):
         self.assertIn("releases/tag/v1", body)  # published by the bot, still checked
         self.assertIn("releases/tag/v0", body)  # releases are read in full too
         self.assertIn(f"1 earlier revision(s) of a issue: {HTML}/issues/9", body)
+        self.assertNotIn("revision(s) of a pull request: " + f"{HTML}/pull/8", body)
+        self.assertNotIn(8, gh.graphql_numbers)
         self.assertIn("discussioncomment-2", body)  # a reply in a recent discussion
         self.assertNotIn("discussions/3", body)  # an old discussion
         self.assertNotIn("/pull/8", body)  # Dependabot
