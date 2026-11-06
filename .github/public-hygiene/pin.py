@@ -61,7 +61,8 @@ def check(api: Api, repo: str, sha: str) -> tuple[bool, str]:
     )
 
 
-TAG_COMMENT = re.compile(r"#[ \t]*(v\d{1,6}(?:\.\d{1,6}){0,2})[ \t]*")
+# ASCII digits only: a fullwidth digit is not a tag name, and would not survive the URL.
+TAG_COMMENT = re.compile(r"#[ \t]*(v[0-9]{1,6}(?:\.[0-9]{1,6}){0,2})[ \t]*")
 # A caller's `uses:` line for the shared workflow: the pinned commit and its comment.
 USES_PIN = re.compile(r"^[^#\n]*/\.github/workflows/public-hygiene\.yml@([0-9a-f]{40})[ \t]*(#[^\n]*)?$", re.M)
 

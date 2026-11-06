@@ -87,6 +87,7 @@ class Pin(unittest.TestCase):
             ("# v1", False),  # not a tag here
             ("# .github main at the merge of #9", False),  # a description is never checked
             ("# release v1.0.0", False),
+            ("# v" + chr(0xFF11) + ".0.0", False),  # a fullwidth digit: refused before any request
             ("", False),
             (None, False),
         ):
