@@ -90,6 +90,8 @@ SKIPPED_BOTS = frozenset(
         "github-actions[bot]",
         "renovate[bot]",
         "sentry[bot]",
+        "seer-by-sentry[bot]",
+        "Copilot",  # the Copilot reviewer's login (account type Bot)
         "copilot-pull-request-reviewer[bot]",
     }
 )

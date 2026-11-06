@@ -334,7 +334,9 @@ class RuleCases(unittest.TestCase):
     def test_skipped_authors_need_the_bot_type(self) -> None:
         self.assertTrue(rules.is_skipped_author("dependabot[bot]", "Bot"))
         self.assertFalse(rules.is_skipped_author("dependabot[bot]", "User"))
-        self.assertTrue(rules.is_skipped_author("sentry[bot]", "Bot"))
+        for bot in ("sentry[bot]", "seer-by-sentry[bot]", "Copilot", "copilot-pull-request-reviewer[bot]"):
+            self.assertTrue(rules.is_skipped_author(bot, "Bot"), bot)
+        self.assertFalse(rules.is_skipped_author("Copilot", "User"))
         self.assertFalse(rules.is_skipped_author("someone[bot]", "Bot"))
         self.assertFalse(rules.is_skipped_author(None, None))
 
