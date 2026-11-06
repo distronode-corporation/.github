@@ -249,12 +249,89 @@ class GoPhpAndCamelCaseKeys(Case):
             "dbPassword = YOUR_DB_PASSWORD_HERE_2",
             "refreshToken: ${{ secrets.REFRESH_TOKEN_2 }}",
             "$clientSecret = getenv(CLIENT_SECRET_2)",
-            "$dbPassword = $env:DB_PASSWORD",
+            "$dbPassword = $env:DB_PASSWORD_2",
         ])
 
     def test_not_keys(self) -> None:
         v = J(["Kx92m", "Lq7ZtPq"])
         self.quiet([f"publicKey: {v}", f"monkey: {v}", f"clientId: {v}", f"keyboard: {v}", f"tokenizer := {v}"])
+
+
+class ReviewOfTheCutTemplate(Case):
+    """The independent review of the cut-template change and Seer round 3: each test pins
+    one fix, both ways."""
+
+    def test_a_cut_counts_only_when_the_tail_closes_that_opener(self) -> None:
+        # The tail must close the template before any quote or backtick, as one closed
+        # span with no second opener of its kind, and only that opener is credited.
+        v = J(["Kx92m", "Lq7ZtPqW"])
+        self.fire([
+            '{"password": "${' + v + '"}',
+            '{"password":"Ab${' + v + '","user":"x"}',
+            'password="q7$(' + J(["Lm2vR9", "xT4kP8w"]) + '" (rotated)',
+            "Set `DB_PASSWORD=q7$(" + J(["Lm2vR9", "xT4kP8w"]) + "` in the env (see [docs](https://x.example))",
+            "password=${" + v + "$(x more)",
+            "password: {{" + v + " # see {{ docs }}",
+        ])
+        self.quiet([
+            "token=$(gh auth token2)",
+            "password: {% raw %}{{ db_password2 }}{% endraw %}",
+            "password=$(openssl rand -hex 32)",
+        ])
+
+    def test_variable_references_stay_quiet(self) -> None:
+        self.quiet([
+            "$password = $env:DB_PASSWORD_2",
+            "password: $env:DB_PASSWORD2",
+            "$dbPassword = $dbPassword2;",
+            "postgres://app:$dbPassword2@localhost/db",
+            "password=%DbPassword2%",
+        ])
+        # A `$` in front of a value is not a variable unless the rest reads as one.
+        self.fire([J(["password=$", "Kx92m", "Lq7ZtPqW"]), J(["password=$", "kx92m", "Lq7ZtPqW"])])
+
+    def test_pascal_case_keys(self) -> None:
+        v = J(["Kx92m", "Lq7ZtPq"])
+        self.fire([
+            f"ClientSecret: {v}",
+            f"DbPassword = {v}",
+            f"RefreshToken={v}",
+            f"JwtSecret: {v}",
+            f"WebhookSecret: {v}",
+            f"AdminPassword: {v}",
+            f'$ClientSecret = "{v}"',
+            f'{{"ClientSecret": "{v}"}}',
+        ])
+        self.quiet([f"PublicKey: {v}", f"Monkey: {v}", f"Tokenizer: {v}", f"ClientId: {v}", f"SecretsManager: {v}"])
+
+    def test_a_url_value_is_judged_by_its_parts(self) -> None:
+        v = J(["Kx92m", "Lq7ZtPqW", "2vR8"])
+        self.quiet([
+            "token: https://docs.example.org/v2/tokens",
+            "refreshToken: https://docs.example.org/v2/tokens",
+            "api_key: https://dashboard.vendor.org/settings/api2",
+            "token: https://hooks.example.com/services/${HOOK_PATH_2}",
+        ])
+        self.fire([
+            f"token: https://hooks.example.com/services/T0001/B0002/{v}",
+            f"webhook_token=https://hooks.example.com/hook?key={v}&x=1",
+            f"token: https://{v}@git.example.org/r.git",
+        ])
+
+    def test_two_different_placeholder_words_mark_a_placeholder(self) -> None:
+        self.quiet([
+            "token=YourGitHubTokenHere1",
+            "OPENAI_API_KEY=sk-your-openai-key-here-1",
+            "TWILIO_AUTH_TOKEN=your_twilio_auth_token1",
+            "SECRET_KEY=django-insecure-your-secret-key-1",
+        ])
+        # Secret nouns with no placeholder word, or one placeholder word alone, are not
+        # enough: the residue still counts.
+        self.fire([J(["token=", "Kx92m", "Lq7Zt", "TokenAuth"]), J(["password=", "Sample", "Kx92m", "Lq7ZtPq"])])
+
+    def test_the_value_is_what_the_key_pattern_captured(self) -> None:
+        # A key with a placeholder word or `is` in it used to be read as part of the value.
+        self.fire(["x-token-here-secret=Ab12345x", "is-example-password=Ab12345x", "token-sample-password=Ab12345x"])
 
 
 class CodePathsStayFlagged(Case):

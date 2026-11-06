@@ -205,8 +205,8 @@ TOKEN_PATTERNS = (
     _c(r"(?<![\w-])sntry[su]_[A-Za-z0-9+/=_\-]{20,}"),
     _c(r"(?<![\w-])eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"),
     _c(r"-----BEGIN (?:[A-Z0-9]+ ){0,4}PRIVATE KEY(?: BLOCK)?-----"),
-    _c(r"\bBearer\s++[A-Za-z0-9._~+/\-]{20,}=*", IC),
-    _c(r"\bauth\s++token\s*+[:=]?\s*+[0-9a-f]{32}\b", IC),
+    _c(r"\bBearer\s++(?P<value>[A-Za-z0-9._~+/\-]{20,}=*)", IC),
+    _c(r"\bauth\s++token\s*+[:=]?\s*+(?P<value>[0-9a-f]{32})\b", IC),
     # A password in a URL's user info.
     _c(r"(?<![\w+.\-])[a-z][a-z0-9+.\-]{0,30}://[^\s/:@]{0,100}:[^\s/@]{6,200}@[\w.\-]+", IC),
     # `password = value` and friends. Prefixed names and flags count too (`DB_PASSWORD=`,
@@ -216,7 +216,7 @@ TOKEN_PATTERNS = (
     _c(
         r"(?<![\w-])(?:-{1,2})?(?:[A-Za-z0-9]+[_\-]){0,4}"
         r"(?:password|passwd|pwd|pw|secret|token|api[_\-]?key|api[_\-]?token|access[_\-]?token|auth[_\-]?token)"
-        r"(?:[_\-](?:access[_\-])?key)?['\"]?\s*+(?::=|=>|[:=])\s*+['\"`]?[^\s'\"`,;)<>]{8,200}",
+        r"(?:[_\-](?:access[_\-])?key)?['\"]?\s*+(?::=|=>|[:=])\s*+['\"`]?(?P<value>[^\s'\"`,;)<>]{8,200})",
         IC,
     ),
     # The same with a camelCase key (`clientSecret`, `dbPassword`, `refreshToken`,
@@ -224,34 +224,32 @@ TOKEN_PATTERNS = (
     # keys, and a PHP or PowerShell `$` in front is allowed (`$clientSecret = ...`). Go's
     # `:=` and PHP's `=>` count as delimiters in both.
     _c(
-        r"(?<![\w-])(?:[a-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3}(?:Secret|Password|Passwd|Pwd|Token)"
-        r"|(?:[a-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3})?(?:[Ss]ecret|[Pp]rivate|[Aa]ccess|[Ss]igning|[Aa]pi|[Ee]ncryption|[Mm]aster)Key)"
-        r"(?![a-z])['\"]?\s*+(?::=|=>|[:=])\s*+['\"`]?[^\s'\"`,;)<>]{8,200}"
+        r"(?<![\w-])(?:[A-Za-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3}(?:Secret|Password|Passwd|Pwd|Token)"
+        r"|(?:[A-Za-z][a-z0-9]{0,30}(?:[A-Z][a-z0-9]{0,30}){0,3})?(?:[Ss]ecret|[Pp]rivate|[Aa]ccess|[Ss]igning|[Aa]pi|[Ee]ncryption|[Mm]aster)Key)"
+        r"(?![a-z])['\"]?\s*+(?::=|=>|[:=])\s*+['\"`]?(?P<value>[^\s'\"`,;)<>]{8,200})"
     ),
     # A password written in prose: `the password is ...`.
-    _c(r"\bpassword\s++(?:is|was)\s++['\"`]?[^\s'\"`,;)<>]{8,200}", IC),
+    _c(r"\bpassword\s++(?:is|was)\s++['\"`]?(?P<value>[^\s'\"`,;)<>]{8,200})", IC),
 )
 
-ASSIGNMENT_VALUE = _c(r"(?::=|=>|[:=]|\bis|\bwas|\bBearer|\btoken)\s*+['\"`]?([^\s'\"`,;)<>]{8,200})$", IC)
 URL_PASSWORD = _c(r"://[^\s/:@]*:([^\s/@]+)@")
-# a template or a mask, not a character a real password may hold:
-# `${X}`, `$(cmd)`, `{{ x }}`, `{% x %}`, `{name}`, `%(x)s`, a whole `$NAME`, `%NAME%`, `<your-token>`,
-# `***`. A lone `$ % * { }` is a password character, and `%2B` is URL encoding.
+# A URL as the value (`token: https://docs.example.org/v2/tokens`): its user info, path
+# segments and query values are what may hold a secret, not the host or the scheme.
+URL_VALUE = _c(r"[a-z][a-z0-9+.\-]{0,30}://(?:([^/?#@]*)@)?[^/?#]*", IC)
+URL_PARTS = _c(r"[/?&#;=]")
 # A template's whole span (`${X}`, `${{ x }}`, `$(cmd)`, `{{ x }}`, `{% x %}`, `{name}`,
-# `%(x)s`, a whole `$NAME`, `%NAME%`). A value that is a template and little else is a
-# placeholder; a real secret that merely holds a brace or a percent sign is not. Spans
-# are bounded, and a value is at most 200 characters.
-_TEMPLATE_SPAN_PARTS = (
-    r"\$\{\{.{0,200}?(?:\}\}|{END})|\$\{[^{}]{0,200}(?:\}|{END})|\$\([^()]{0,200}(?:\)|{END})|\{\{.{0,200}?(?:\}\}|{END})"
-    r"|\{%.{0,200}?(?:%\}|{END})|\{[A-Za-z_][\w.\-]{0,100}\}|%\([^()]{0,100}(?:\)s?|{END})"
+# `%(x)s`), or a whole value that is a variable (`$NAME`, `$name`, `$dbPassword2`,
+# `$env:NAME`, `%NAME%`, `%DbPassword2%`). A value that is a template and little else is a
+# placeholder; a real secret that merely holds a brace, a dollar or a percent sign is not
+# (`%2B` is URL encoding). Closed templates only: an opener with no closer counts only
+# where the value was cut short and the rest of the line closes it (_template_cut_at).
+# Spans are bounded, and a value is at most 200 characters.
+TEMPLATE_SPAN = _c(
+    r"\$\{\{.{0,200}?\}\}|\$\{[^{}]{0,200}\}|\$\([^()]{0,200}\)|\{\{.{0,200}?\}\}"
+    r"|\{%.{0,200}?%\}|\{[A-Za-z_][\w.\-]{0,100}\}|%\([^()]{0,100}\)s?"
     r"|^\$(?:[A-Z_][A-Z0-9_]*|[a-z_][a-z0-9_]*)$|%[A-Z_][A-Z0-9_]{2,}%|^%[a-z_][a-z0-9_]*%$"
+    r"|^\$env:[A-Za-z_][A-Za-z0-9_]*$|^\$[a-z_][a-z0-9_]*(?:[A-Z][a-z0-9_]+)+$|^%[A-Za-z_][A-Za-z0-9_]{2,}%$"
 )
-# Closed templates only. An opener with no closer is a template only where the value
-# itself was cut short by a character values cannot hold (`$(gh auth token)` stops at
-# the space; `{{ .Values.x }}` at the first space): TEMPLATE_SPAN_CUT accepts the end of
-# the value as the closer, and is used only then.
-TEMPLATE_SPAN = _c(_TEMPLATE_SPAN_PARTS.replace("|{END}", ""))
-TEMPLATE_SPAN_CUT = _c(_TEMPLATE_SPAN_PARTS.replace("{END}", "$"))
 # A mask or an angle-bracket placeholder: never a secret, whatever surrounds it.
 MASK_SHAPE = _c(r"<[^<>]+>|\*{3,}")
 PLACEHOLDER_WORDS = frozenset(
@@ -268,6 +266,9 @@ PLACEHOLDER_FILLER = frozenset(
      "account", "my", "me", "a", "an", "the", "to", "with", "real", "actual", "own", "goes", "put", "paste",
      "enter", "value", "new", "it"}
 )
+# The filler words that name what a secret is; with a placeholder word they mark a
+# placeholder whatever else the value holds (_is_placeholder_value).
+SECRET_NOUNS = frozenset({"api", "key", "keys", "token", "secret", "password", "pass", "pwd", "access", "auth"})
 _SEGMENTS = PLACEHOLDER_WORDS_IN_VALUE | PLACEHOLDER_FILLER
 _SEGMENT_MAX = max(map(len, _SEGMENTS))
 CHANGE_ME = _c(r"(?<![a-z])change[_\-]?(?:me|it)(?![a-z])", IC)
@@ -303,25 +304,25 @@ def _split(word: str) -> list[str] | None:
     return parts
 
 
-def _is_placeholder_value(value: str, cut: bool = False) -> bool:
-    """`cut`: the value ends inside a template whose closer follows just after it, so the
-    unclosed opener at its end still counts as a template."""
-    spans_re = TEMPLATE_SPAN_CUT if cut else TEMPLATE_SPAN
+def _is_placeholder_value(value: str, cut_at: int = -1) -> bool:
+    """`cut_at`: where an unclosed template at the end of the value starts, when the rest
+    of the line closes it (see _template_cut_at); that tail counts as template. -1: none."""
     if TEMPLATE_PREFIX.match(value) or MASK_SHAPE.search(value):
         return True
     # A value that is mostly template (`prefix-${NAME}`) is a placeholder; a template span
     # inside a value that is mostly not (`Kx9{name}Lq7ZtPq2`) is a value.
-    spans = sum(m.end() - m.start() for m in spans_re.finditer(value))
+    head = value if cut_at < 0 else value[:cut_at]
+    spans = sum(m.end() - m.start() for m in TEMPLATE_SPAN.finditer(head)) + (len(value) - len(head))
     if spans * 2 >= len(value):
         return True
-    rest = spans_re.sub(" ", value)
+    rest = TEMPLATE_SPAN.sub(" ", head)
     # `CHANGE_ME` or a placeholder word marks a placeholder only when what is left, besides
     # them, filler words and digits, is too short to be a secret: `Sample42Lq9vZ` keeps
     # `Lq`, `v`, `Z`.
-    marked = False
     without = CHANGE_ME.sub(" ", rest)
-    marked = marked or without != rest
+    marked = without != rest
     residue = 0
+    words_seen: set[str] = set()
     for w in VALUE_WORD.findall(without):
         w = w.lower()
         if w.isdigit():
@@ -334,24 +335,54 @@ def _is_placeholder_value(value: str, cut: bool = False) -> bool:
             residue += len(w)
         else:
             marked = marked or any(p in PLACEHOLDER_WORDS_IN_VALUE for p in parts)
-    return marked and residue < 4
+            words_seen.update(p for p in parts if p in PLACEHOLDER_WORDS_IN_VALUE or p in SECRET_NOUNS)
+    if marked and residue < 4:
+        return True
+    # Two or more different words a placeholder is made of, one of them a placeholder word
+    # (`your` plus `here`, `your` plus `auth` and `token`), mark one whatever else the value
+    # holds: `your_twilio_auth_token1`, `django-insecure-your-secret-key-1`.
+    return len(words_seen) >= 2 and not words_seen.isdisjoint(PLACEHOLDER_WORDS_IN_VALUE)
 
 
 # Each template opener and its closer, longest opener first.
 TEMPLATE_CLOSERS = (("${{", "}}"), ("${", "}"), ("$(", ")"), ("{{", "}}"), ("{%", "%}"), ("%(", ")"))
 
 
-def _template_continues(value: str, tail: str) -> bool:
-    """Whether `value` ends inside a template whose closer follows in `tail` (the rest of
-    the line after the value): `$(gh auth token)` stops at the space, and its `)` is in
-    the tail. An opener whose closer never comes is not a template."""
-    best = -1
-    closer = ""
-    for opener, close in TEMPLATE_CLOSERS:
-        i = value.rfind(opener)
-        if i > best and close not in value[i + len(opener) :]:
-            best, closer = i, close
-    return best >= 0 and closer in tail
+_QUOTE = re.compile(r"['\"`]")
+
+
+def _template_cut_at(value: str, tail: str) -> int:
+    """Where the one unclosed template at the end of `value` starts, if `tail` (the rest of
+    the line) closes it before any quote, as the closed TEMPLATE_SPAN grammar reads it,
+    with no second opener of its kind inside: `$(gh auth token)` stops at the space and
+    its `)` follows. Else -1: `"${Kx9..."}` closes after a quote, and in `{{Kx9... # see
+    {{ docs }}` the closer belongs to the later opener."""
+    best, opener = -1, ""
+    for op, close in TEMPLATE_CLOSERS:
+        i = value.rfind(op)
+        if i > best and close not in value[i + len(op) :]:
+            best, opener = i, op
+    if best < 0:
+        return -1
+    head = _QUOTE.split(tail, maxsplit=1)[0]
+    m = TEMPLATE_SPAN.match(value[best:] + head)
+    if not m or m.end() <= len(value) - best or opener in m.group(0)[len(opener) :]:
+        return -1
+    return best
+
+
+def _value_is_real(value: str) -> bool:
+    """A digit, a letter and at least eight different characters."""
+    return bool(re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) and len(set(value)) >= 8
+
+
+def _url_value_is_real(url: str) -> bool:
+    """A URL as the value holds a secret only in its user info, a path segment or a query
+    value (`https://hooks.example.com/services/T0/B0/<token>`), not in its host or its
+    scheme: `token: https://docs.example.org/v2/tokens` is a link."""
+    start = URL_VALUE.match(url)
+    parts = [start.group(1) or "", *URL_PARTS.split(url[start.end() :])]
+    return any(_value_is_real(part) and not _is_placeholder_value(part) for part in parts)
 
 
 def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
@@ -365,18 +396,19 @@ def _token_payload_is_real(m: re.Match[str], text: str) -> bool:
         # `postgres://user:password@localhost` and `://u:${PASS}@h` are documentation.
         secret = userinfo.group(1)
         return not (_is_placeholder_value(secret) or secret.lower() in PLACEHOLDER_WORDS or len(set(secret)) < 6)
-    assignment = ASSIGNMENT_VALUE.search(found)
-    if assignment:
+    value = m.groupdict().get("value")
+    if value is not None:
+        # The value a key pattern captured. A URL is judged by its parts, each on its own,
+        # so a placeholder word in its host neither hides nor makes a secret.
+        if URL_VALUE.match(value):
+            return _url_value_is_real(value)
         # `password: Simulator.app` is prose; a value with no digit is a word, not a secret.
-        # `token=x` also matches at `token`, so the captured value can start with the
-        # delimiter; strip it before the placeholder test.
-        value = assignment.group(1).lstrip(":='\"`")
         # The value may end inside a template the value pattern could not hold (a space or
-        # a parenthesis cut it); it counts as one only if its closer follows on the line.
+        # a parenthesis cut it); it counts as one only if the rest of the line closes it.
         tail = text[m.end() : m.end() + 200].split("\n", 1)[0]
-        if _is_placeholder_value(value, _template_continues(value, tail)):
+        if _is_placeholder_value(value, _template_cut_at(value, tail)):
             return False
-        return bool(re.search(r"\d", value) and re.search(r"[A-Za-z]", value)) and len(set(value)) >= 8
+        return _value_is_real(value)
     body = re.sub(r"^[A-Za-z]+[_\-]", "", found)
     return len(set(body)) >= 8
 

@@ -7,8 +7,8 @@ name: Check
 # - `gitleaks`: secrets anywhere in the history, not just the tip.
 # - `public-hygiene-rules`: the unit tests of the shared public hygiene check
 #   (`.github/public-hygiene/`), which every public repository calls.
-# - `caller-pin-current`: this repository's own caller pins the newest v* tag (on a pull
-#   request), or the checker in this tree (on main).
+# - `caller-pin-current`: this repository's own caller pins the newest v* release tag on
+#   the base branch (on a pull request), or the checker in this tree (on main).
 #
 # The first three are required checks in the default branch's ruleset, so a pull request
 # cannot merge until they pass. The other two are not (yet) required.
@@ -103,9 +103,9 @@ jobs:
 
   # This repository's own caller (public-text.yml) pins a commit of this repository,
   # named by its v* tag (the `pin` job requires that).
-  # - On a pull request: it must pin the newest v* tag. A pull request that changes the
-  #   checker cannot pin its own commit (that commit has no tag), so it keeps the newest
-  #   tag, and the re-pin follows the merge.
+  # - On a pull request: it must pin the newest v* release tag on the base branch. A pull
+  #   request that changes the checker cannot pin its own commit (that commit has no tag),
+  #   so it keeps the newest tag, and the re-pin follows the merge.
   # - On main: the pinned commit's checker must equal this tree's, so a merged checker
   #   change stays red here until its merge commit is tagged and this caller re-pinned.
   caller-pin-current:
@@ -129,9 +129,12 @@ jobs:
             exit 1
           fi
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            latest=$(git tag -l 'v*' --sort=-v:refname | head -n 1)
-            if [ -z "$latest" ] || [ "$(git rev-list -n 1 "$latest")" != "$pin" ]; then
-              echo "::error::public-text.yml pins $pin; on a pull request it must pin the newest v* tag (${latest:-none})."
+            # The newest release tag on the base branch: a tag only on another branch, or a
+            # pre-release (`v2.0.0-rc1`), is not one. It must have the shape pin.py's
+            # TAG_COMMENT accepts.
+            latest=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' "origin/$GITHUB_BASE_REF" 2>/dev/null) || latest=""
+            if ! [[ "$latest" =~ ^v[0-9]{1,6}(\.[0-9]{1,6}){0,2}$ ]] || [ "$(git rev-list -n 1 "$latest")" != "$pin" ]; then
+              echo "::error::public-text.yml pins $pin; on a pull request it must pin the newest v* release tag on $GITHUB_BASE_REF (${latest:-none})."
               exit 1
             fi
             echo "public-text.yml pins the newest tag, $latest."
