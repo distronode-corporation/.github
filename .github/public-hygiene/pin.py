@@ -10,6 +10,12 @@ name, including one pushed to a pull request branch or to a fork (an impostor co
 `check` passes only when the pinned commit is the default branch's head or one of its
 ancestors.
 
+`check_comment` passes only when the comment after the pin is exactly `# <tag>`, where the
+tag is a `v*` tag of this repository (the tags a ruleset keeps from moving) that points at
+the pinned commit. A branch name (`# main`) drifts as soon as the branch moves, and a
+description is never checked against the sha, so both are refused. zizmor's online
+`ref-version-mismatch` audit checks the same pairing, and only for a one-word comment.
+
 What each caller catches:
 - The `pin` job runs the pinned commit's own code, so it catches an honest mistake (a
   pin left on a pull request branch). It cannot catch an impostor commit: that commit's
@@ -24,6 +30,7 @@ the called workflow's own repository and commit), GH_TOKEN, GITHUB_API_URL.
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 import sys
@@ -54,16 +61,81 @@ def check(api: Api, repo: str, sha: str) -> tuple[bool, str]:
     )
 
 
+TAG_COMMENT = re.compile(r"#[ \t]*(v\d{1,6}(?:\.\d{1,6}){0,2})[ \t]*")
+# A caller's `uses:` line for the shared workflow: the pinned commit and its comment.
+USES_PIN = re.compile(r"^[^#\n]*/\.github/workflows/public-hygiene\.yml@([0-9a-f]{40})[ \t]*(#[^\n]*)?$", re.M)
+
+
+def check_comment(api: Api, repo: str, sha: str, comment: str | None) -> tuple[bool, str]:
+    """Whether `comment` is `# <tag>` for a `v*` tag of `repo` that points at `sha`."""
+    if not comment or not comment.strip():
+        return False, f"The pin {sha[:12]} has no comment; write `# <tag>`, a v* tag on that commit."
+    m = TAG_COMMENT.fullmatch(comment.strip())
+    if not m:
+        return False, (
+            f"The comment after the pin {sha[:12]} must be exactly `# <tag>` (a v* tag on that commit), "
+            "not a branch name or a description."
+        )
+    tag = m.group(1)
+    try:
+        ref = api.get(f"/repos/{repo}/git/ref/tags/{tag}")
+    except ApiError as e:
+        if e.status == 404:
+            return False, f"The comment names {tag}, which is not a tag of {repo}."
+        raise
+    obj = (ref or {}).get("object") if isinstance(ref, dict) else None
+    if not isinstance(obj, dict):
+        return False, f"The comment names {tag}, which is not a tag of {repo}."
+    target = obj.get("sha")
+    if obj.get("type") == "tag":  # an annotated tag: its commit is one step further
+        target = ((api.get(f"/repos/{repo}/git/tags/{target}") or {}).get("object") or {}).get("sha")
+    if target != sha:
+        return False, f"The comment names {tag}, which points at {str(target)[:12]}, not at the pinned commit {sha[:12]}."
+    return True, f"The comment names {tag}, the pinned commit {sha[:12]}."
+
+
+def check_caller(api: Api, repo: str, text: str) -> list[str]:
+    """Every problem with the pins in a caller workflow's text: each must be a commit on
+    `repo`'s default branch, named by its tag in the comment. Empty means all is well."""
+    pins = USES_PIN.findall(text)
+    if not pins:
+        return ["The caller pins no commit of the shared workflow."]
+    problems: list[str] = []
+    for sha, comment in pins:
+        for ok, message in (check(api, repo, sha), check_comment(api, repo, sha, comment)):
+            if not ok:
+                problems.append(message)
+    return problems
+
+
+def caller_text(api: Api, caller_repo: str, workflow_ref: str, caller_sha: str) -> str:
+    """The calling workflow's file, as committed at `caller_sha` (read, never run)."""
+    path = workflow_ref.split("@", 1)[0]
+    prefix = caller_repo + "/"
+    if not path.startswith(prefix) or not re.fullmatch(r"[0-9a-f]{40}", caller_sha):
+        raise ApiError("the calling workflow could not be named")
+    content = api.get(f"/repos/{caller_repo}/contents/{path[len(prefix):]}?ref={caller_sha}") or {}
+    return base64.b64decode(str(content.get("content") or "")).decode("utf-8", "replace")
+
+
 def main() -> int:
     env = os.environ
+    repo, sha = env.get("WORKFLOW_REPOSITORY", ""), env.get("WORKFLOW_SHA", "")
     try:
         api = RestApi(env.get("GITHUB_API_URL", "https://api.github.com"), env.get("GH_TOKEN", ""))
-        ok, message = check(api, env.get("WORKFLOW_REPOSITORY", ""), env.get("WORKFLOW_SHA", ""))
+        ok, message = check(api, repo, sha)
+        problems = [] if ok else [message]
+        if env.get("CALLER_REPOSITORY"):
+            text = caller_text(api, env["CALLER_REPOSITORY"], env.get("CALLER_WORKFLOW_REF", ""), env.get("CALLER_SHA", ""))
+            problems += [p for p in check_caller(api, repo, text) if p not in problems]
     except ApiError as e:
         print(f"::error::{e}")
         return 2
-    print(message if ok else f"::error::{message}")
-    return 0 if ok else 1
+    for p in problems:
+        print(f"::error::{p}")
+    if not problems:
+        print(message + " The comment names its tag.")
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":
