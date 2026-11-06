@@ -1,0 +1,56 @@
+name: Public hygiene
+
+# The organization's public hygiene check for issue and pull request text: titles,
+# descriptions, conversation comments, reviews and review comments. Every public
+# repository calls it from a small `.github/workflows/public-hygiene.yml` of its own,
+# pinned to a commit of this repository:
+#
+#   uses: distronode-corporation/.github/.github/workflows/public-hygiene.yml@<sha>
+#
+# The rules and the code are in `.github/public-hygiene/` (rules.py, event.py and their
+# tests). Each run reads the whole thread, fails when anything in it matches a rule, and
+# keeps ONE comment on the thread up to date naming the rule ids and what they cover. The
+# matched text is never repeated: not in the comment, the log or the step summary.
+#
+# Safe on untrusted text by construction:
+# - Nothing from the caller's repository is checked out or run. The only checkout is
+#   this repository, at the exact commit the caller pinned (`job.workflow_sha`).
+# - No event text is expanded into a `run:` line or an `env:` value (step env is
+#   printed in the log). event.py reads the event from GITHUB_EVENT_PATH and the thread
+#   from the REST API.
+# - No third-party action. The token is the caller's GITHUB_TOKEN, used for reading the
+#   thread and writing the one comment.
+on:
+  workflow_call: {}
+
+# Nothing at the top level; the job asks for exactly what it needs, and a called
+# workflow can never get more than its caller grants.
+permissions: {}
+
+jobs:
+  text:
+    name: text
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # check out this repository's checker
+      issues: write # read the thread, and keep the one comment on an issue
+      pull-requests: write # read reviews, and keep the one comment on a pull request
+    steps:
+      - name: Check out the checker (this repository, at the pinned commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/public-hygiene
+
+      # A rule that has stopped matching its planted examples fails here, loudly,
+      # instead of passing every thread quietly.
+      - name: Self-test the rules
+        run: python3 -I -m unittest discover -s .github/public-hygiene -t .github/public-hygiene
+
+      - name: Check the thread
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I .github/public-hygiene/event.py
