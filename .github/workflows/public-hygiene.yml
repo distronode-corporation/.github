@@ -30,16 +30,26 @@ name: Public hygiene
 #   the pinned commit's own code, so it catches a pin left on an unmerged commit, not an
 #   impostor commit (which could skip it). The weekly sweep, which runs from main,
 #   checks every caller's pin for that; a reviewer still checks pins by hand.
+# - `zizmor`: static analysis of the CALLER's own workflows and actions, on a pull
+#   request only. Advisory: the findings go to the caller's code scanning as SARIF and
+#   the job does not fail on them, so a zizmor release that adds or re-grades an audit
+#   cannot turn every public repository red at once (1.31.0 made `issue_comment`, which
+#   every caller of this check listens to, a high finding). It needs the caller to grant
+#   `security-events: write`; a caller that does not is refused at startup by GitHub,
+#   for every job of this workflow. Skipped for a fork's pull request and for
+#   Dependabot, whose token cannot upload SARIF.
 #
 # Safe on untrusted text by construction:
 # - Nothing from the caller's repository is checked out or run. The only checkout is
-#   this repository, at the exact commit the caller pinned (`job.workflow_sha`).
+#   this repository, at the exact commit the caller pinned (`job.workflow_sha`). zizmor
+#   reads the caller's files through the API and parses them; it never runs them.
 # - No event text is expanded into a `run:` line or an `env:` value (step env is
 #   printed in the log). event.py reads the event from GITHUB_EVENT_PATH and the thread
 #   from the API.
-# - No third-party action. The token is the caller's GITHUB_TOKEN. The one secret, the
-#   denylist key, is in the env of the one step that scans, which runs only this
-#   repository's pinned code; no step prints it.
+# - One third-party action, zizmorcore/zizmor-action, pinned to a commit, in the
+#   `zizmor` job alone, which holds no secret. The token is the caller's GITHUB_TOKEN.
+#   The one secret, the denylist key, is in the env of the one step that scans, which
+#   runs only this repository's pinned code; no step prints it.
 on:
   workflow_call:
     secrets:
@@ -114,3 +124,28 @@ jobs:
           CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
           CALLER_SHA: ${{ github.sha }}
         run: python3 -I -B .github/public-hygiene/pin.py
+
+  # Audits the caller at the pull request's merge commit (`github.sha`), read through the
+  # API as `<owner>/<repo>@<sha>`, so nothing is checked out. The findings appear in the
+  # caller's Security tab and on the pull request's changed lines; a high finding fails
+  # nothing. Making it blocking later means a second zizmor step with `min-severity: high`
+  # once no caller has a high finding.
+  zizmor:
+    name: zizmor
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action != 'edited' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # read the caller's workflows and actions through the API
+      security-events: write # upload the SARIF to the caller's code scanning
+    steps:
+      - name: zizmor (advisory, SARIF to code scanning)
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          version: 1.31.1
+          inputs: ${{ github.repository }}@${{ github.sha }}
+          advanced-security: true
