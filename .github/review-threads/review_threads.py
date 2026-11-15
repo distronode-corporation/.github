@@ -19,9 +19,10 @@ when none is. The newest status of a context is the one that counts, so a later 
 supersedes an earlier one, whichever event started it. A verdict the commit already
 carries is not written again (GitHub keeps at most 1000 statuses per commit and context).
 
-The job itself does not fail on a verdict, so its own check run is never a stale red. It
-exits 1 only when it could not do its work (an API error, or a refused status write); a
-status of `error` is then written where possible.
+The job itself does not fail on a verdict, so its own check run is never a stale red, with
+one exception: a fork's event run with an unresolved thread (below). Otherwise it exits 1
+only when it could not do its work (an API error, or a refused status write); a status of
+`error` is then written where possible.
 
 A fork's pull request runs with a read-only token, so its event runs cannot write the
 status: they log and summarize the verdict, and the next scheduled run (from this
@@ -36,6 +37,7 @@ first comment, and a link.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import random
@@ -137,7 +139,8 @@ class Http:
                 return json.loads(resp.read() or b"null")
         except urllib.error.HTTPError as e:
             raise ApiError(f"{method} {path}: HTTP {e.code}") from None
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
+        except (urllib.error.URLError, http.client.HTTPException, ValueError, TimeoutError, OSError) as e:
+            # A dropped connection, a truncated body or a body that is not JSON.
             raise ApiError(f"{method} {path}: {type(e).__name__}") from None
 
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:

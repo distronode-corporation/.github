@@ -425,6 +425,12 @@ class HttpTests(unittest.TestCase):
         self.answer(b"")
         self.assertIsNone(rt.Http("t").post("/x", {}))
 
+    def test_a_body_that_is_not_json(self) -> None:
+        for body in (b"<html>oops</html>", b'{"data": ', b"\xff\xfe"):
+            self.answer(body)
+            with self.assertRaises(rt.ApiError):
+                rt.Http("t").graphql("q", {})
+
     def test_get_sends_no_body(self) -> None:
         self.answer(b'{"statuses": []}')
         self.assertEqual(rt.Http("t").get("/x"), {"statuses": []})
@@ -432,7 +438,9 @@ class HttpTests(unittest.TestCase):
         self.assertIsNone(self.seen[0].data)
 
     def test_http_and_network_errors(self) -> None:
-        for err in (rt.urllib.error.HTTPError("u", 403, "no", {}, None), rt.urllib.error.URLError("down"), TimeoutError()):
+        import http.client
+        for err in (rt.urllib.error.HTTPError("u", 403, "no", {}, None), rt.urllib.error.URLError("down"), TimeoutError(),
+                    http.client.IncompleteRead(b"par"), http.client.RemoteDisconnected("gone")):
             self.answer(err)
             with self.assertRaises(rt.ApiError) as cm:
                 rt.Http("t").post("/x", {})
