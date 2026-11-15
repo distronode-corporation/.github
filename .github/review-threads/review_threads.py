@@ -16,7 +16,8 @@ GITHUB_EVENT_PATH and the review threads over GraphQL with the job's GITHUB_TOKE
 Each pull request gets ONE commit status on its head commit, context `review-threads`:
 `failure` while any thread is unresolved (from any author, outdated or not), `success`
 when none is. The newest status of a context is the one that counts, so a later run always
-supersedes an earlier one, whichever event started it.
+supersedes an earlier one, whichever event started it. A verdict the commit already
+carries is not written again (GitHub keeps at most 1000 statuses per commit and context).
 
 The job itself does not fail on a verdict, so its own check run is never a stale red. It
 exits 1 only when it could not do its work (an API error, or a status write refused on a
@@ -105,6 +106,7 @@ class ApiError(Exception):
 
 Graphql = Callable[[str, dict[str, Any]], dict[str, Any]]
 Post = Callable[[str, dict[str, Any]], Any]
+Get = Callable[[str], Any]
 
 
 class Http:
@@ -114,8 +116,9 @@ class Http:
         self.token = token
         self.base = base
 
-    def _request(self, method: str, path: str, body: dict[str, Any]) -> Any:
-        req = urllib.request.Request(self.base + path, data=json.dumps(body).encode(), method=method)
+    def _request(self, method: str, path: str, body: dict[str, Any] | None) -> Any:
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method=method)
         req.add_header("Authorization", f"Bearer {self.token}")
         req.add_header("Accept", "application/vnd.github+json")
         req.add_header("Content-Type", "application/json")
@@ -137,6 +140,9 @@ class Http:
 
     def post(self, path: str, body: dict[str, Any]) -> Any:
         return self._request("POST", path, body)
+
+    def get(self, path: str) -> Any:
+        return self._request("GET", path, None)
 
 
 @dataclass
@@ -261,6 +267,30 @@ def write_status(post: Post, repo: str, sha: str, state: str, description: str, 
     post(f"/repos/{repo}/statuses/{sha}", body)
 
 
+def latest_status(get: Get, repo: str, sha: str) -> tuple[str, str] | None:
+    """The newest `review-threads` status on a commit, as (state, description). The
+    combined status lists the newest status of each context once."""
+    for page in range(1, MAX_PAGES + 1):
+        data = get(f"/repos/{repo}/commits/{sha}/status?per_page=100&page={page}") or {}
+        statuses = data.get("statuses") or []
+        for s in statuses:
+            if s.get("context") == CONTEXT:
+                return s.get("state") or "", s.get("description") or ""
+        if len(statuses) < 100:
+            return None
+    raise ApiError("too many pages of commit statuses")
+
+
+def record(get: Get, post: Post, repo: str, sha: str, state: str, description: str, target_url: str) -> bool:
+    """Write the status unless the commit already has the same one. GitHub keeps at most
+    1000 statuses per commit and context, and the sweep runs every 15 minutes, so an
+    unchanged verdict is never written again. Returns whether it wrote."""
+    if latest_status(get, repo, sha) == (state, description[:140]):
+        return False
+    write_status(post, repo, sha, state, description, target_url)
+    return True
+
+
 def _cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
@@ -289,6 +319,7 @@ def summary(verdicts: list[Verdict], notes: list[str]) -> str:
 
 def run(
     gql: Graphql,
+    get: Get,
     post: Post,
     event_name: str,
     payload: dict[str, Any],
@@ -320,7 +351,7 @@ def run(
             fork = bool(pr) and (pr.get("head", {}).get("repo") or {}).get("full_name") != repo
             if sha and not fork:
                 try:
-                    write_status(post, repo, sha, "error", "Could not read the review threads", run_url)
+                    record(get, post, repo, sha, "error", "Could not read the review threads", run_url)
                 except ApiError:
                     pass
             continue
@@ -338,7 +369,7 @@ def run(
             # can otherwise land last with the older verdict. A changed verdict is written
             # again, so the newest status follows the newest read.
             for _ in range(3):
-                write_status(post, repo, v.sha, v.state, v.description, run_url)
+                record(get, post, repo, v.sha, v.state, v.description, run_url)
                 again = read_pr(gql, repo, number)
                 if again.sha != v.sha or again.state == v.state:
                     break
@@ -362,7 +393,7 @@ def main() -> int:
         payload = json.load(f)
     run_url = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{repo}/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}"
     http = Http(token)
-    status, text = run(http.graphql, http.post, event_name, payload, repo, run_url)
+    status, text = run(http.graphql, http.get, http.post, event_name, payload, repo, run_url)
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if path:
         with open(path, "a", encoding="utf-8") as f:

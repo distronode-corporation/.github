@@ -84,6 +84,16 @@ class Fake:
             },
         }}}
 
+    def get(self, path: str) -> Any:
+        """The combined status: the newest status of each context, once."""
+        self.calls.append("status")
+        sha = path.split("/commits/")[1].split("/")[0]
+        latest: dict[str, dict[str, Any]] = {}
+        for p, body in self.posts:
+            if p.endswith(sha):
+                latest[body["context"]] = body
+        return {"statuses": list(reversed(latest.values()))}
+
     def post(self, path: str, body: dict[str, Any]) -> Any:
         if self.fail_post:
             raise self.fail_post
@@ -99,7 +109,7 @@ def pr_payload(number: int = 1, head_repo: str = REPO, sha: str = "a" * 40) -> d
 
 def go(fake: Fake, event: str = "pull_request", payload: dict[str, Any] | None = None) -> tuple[int, str, list[str]]:
     lines: list[str] = []
-    status, text = rt.run(fake.graphql, fake.post, event, payload if payload is not None else pr_payload(), REPO, RUN, lines.append)
+    status, text = rt.run(fake.graphql, fake.get, fake.post, event, payload if payload is not None else pr_payload(), REPO, RUN, lines.append)
     return status, text, lines
 
 
@@ -249,7 +259,7 @@ class Failures(unittest.TestCase):
         fake = Fake({})
         def boom(q: str, v: dict[str, Any]) -> dict[str, Any]:
             raise rt.ApiError("HTTP 500")
-        status, text = rt.run(boom, fake.post, "schedule", {}, REPO, RUN, lambda s: None)
+        status, text = rt.run(boom, fake.get, fake.post, "schedule", {}, REPO, RUN, lambda s: None)
         self.assertEqual(status, 1)
         self.assertIn("Could not list", text)
 
@@ -385,6 +395,12 @@ class HttpTests(unittest.TestCase):
         self.answer(b"")
         self.assertIsNone(rt.Http("t").post("/x", {}))
 
+    def test_get_sends_no_body(self) -> None:
+        self.answer(b'{"statuses": []}')
+        self.assertEqual(rt.Http("t").get("/x"), {"statuses": []})
+        self.assertEqual(self.seen[0].get_method(), "GET")
+        self.assertIsNone(self.seen[0].data)
+
     def test_http_and_network_errors(self) -> None:
         for err in (rt.urllib.error.HTTPError("u", 403, "no", {}, None), rt.urllib.error.URLError("down"), TimeoutError()):
             self.answer(err)
@@ -413,6 +429,7 @@ class Main(unittest.TestCase):
         class StubHttp:
             def __init__(self, token: str) -> None:
                 self.graphql = fake.graphql
+                self.get = fake.get
                 self.post = fake.post
         try:
             os.environ.update(env)
@@ -434,6 +451,30 @@ class Description(unittest.TestCase):
         rt.write_status(fake.post, REPO, "a" * 40, "success", "x" * 200, "")
         self.assertEqual(len(fake.posts[0][1]["description"]), 140)
         self.assertNotIn("target_url", fake.posts[0][1])
+        self.assertFalse(rt.record(fake.get, fake.post, REPO, "a" * 40, "success", "x" * 200, ""))
+
+
+class ReadBeforeWrite(unittest.TestCase):
+    def test_an_unchanged_verdict_is_not_written_again(self) -> None:
+        fake = Fake({1: [[thread("t1", False)]]})
+        go(fake, "schedule", {})
+        go(fake, "schedule", {})
+        go(fake)
+        self.assertEqual(len(fake.posts), 1)
+        fake.prs[1] = [[thread("t1", True)]]
+        go(fake, "schedule", {})
+        self.assertEqual([b["state"] for _, b in fake.posts], ["failure", "success"])
+
+    def test_other_contexts_and_pages(self) -> None:
+        other = [{"context": f"c{i}", "state": "success", "description": ""} for i in range(100)]
+        pages = {1: {"statuses": other}, 2: {"statuses": [{"context": "review-threads", "state": "failure", "description": "d"}]}}
+        get = lambda path: pages[int(path.rsplit("page=", 1)[1])]
+        self.assertEqual(rt.latest_status(get, REPO, "a" * 40), ("failure", "d"))
+        self.assertIsNone(rt.latest_status(lambda path: {"statuses": other[:3]}, REPO, "a" * 40))
+        self.assertIsNone(rt.latest_status(lambda path: None, REPO, "a" * 40))
+        self.assertEqual(rt.latest_status(lambda path: {"statuses": [{"context": "review-threads"}]}, REPO, "a"), ("", ""))
+        with self.assertRaises(rt.ApiError):
+            rt.latest_status(lambda path: {"statuses": other}, REPO, "a" * 40)
 
 
 if __name__ == "__main__":
