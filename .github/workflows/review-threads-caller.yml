@@ -38,4 +38,4 @@ jobs:
       contents: read # the script's checkout
       pull-requests: read # open pull requests and their review threads
       statuses: write # the `review-threads` commit status
-    uses: distronode-corporation/.github/.github/workflows/review-threads.yml@aba0e2441c8f9716f14211ddaa75241d2c9d1880 # pre-merge head, moves to the merged commit
+    uses: distronode-corporation/.github/.github/workflows/review-threads.yml@278ef52f6a5d287f3b9c12d0a764eeb85bbabe55 # pre-merge head, moves to the merged commit
