@@ -368,14 +368,18 @@ class Race(unittest.TestCase):
 
 
 class Flapping(unittest.TestCase):
-    def test_a_verdict_that_keeps_changing_is_written_three_times(self) -> None:
+    def test_a_verdict_that_keeps_changing_ends_on_the_newest_read(self) -> None:
         fake = Fake({1: [[thread("t1", False)]]})
         def flip() -> None:
             fake.prs[1] = [[thread("t1", not fake.prs[1][0][0]["isResolved"])]]
         fake.on_post = flip
-        status, _, _ = go(fake)
+        status, text, lines = go(fake)
         self.assertEqual(status, 0)
-        self.assertEqual(len(fake.posts), 3)
+        self.assertEqual(len(fake.posts), 4)
+        # The status and the summary end on the same verdict.
+        last = fake.posts[-1][1]
+        self.assertIn(f"#1 (aaaaaaaaaaaa): {last['description']}", text)
+        self.assertTrue(any("kept changing" in l for l in lines))
 
 
 class FakeResponse:

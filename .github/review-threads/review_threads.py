@@ -414,6 +414,11 @@ def run(
                     break
                 out(f"#{number}: the verdict changed while it was written; writing it again")
                 verdicts[-1] = v = again
+            else:
+                # Still changing after three rounds: record the newest read, so the status
+                # and the summary agree, and let the next run settle it.
+                record(get, post, repo, v.sha, v.state, v.description, run_url)
+                out(f"::warning::#{number}: the verdict kept changing; recorded the newest read")
         except ApiError as e:
             failed = True
             out(f"::error::#{number}: could not write the '{CONTEXT}' status: {e}")
