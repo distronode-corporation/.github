@@ -7,6 +7,8 @@ name: Check
 # - `gitleaks`: secrets anywhere in the history, not just the tip.
 # - `public-hygiene-rules`: the unit tests of the shared public hygiene check
 #   (`.github/public-hygiene/`), which every public repository calls.
+# - `review-threads-tests`: the unit tests of the shared review threads check
+#   (`.github/review-threads/`), which every repository calls.
 # - `caller-pin-current`: this repository's own caller pins the newest v* release tag on
 #   the base branch (on a pull request), or the checker in this tree (on main).
 #
@@ -157,3 +159,15 @@ jobs:
 
       - name: Unit tests
         run: python3 -I -B -m unittest discover -v -s .github/public-hygiene -t .github/public-hygiene
+
+  review-threads-tests:
+    name: review-threads-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Unit tests
+        run: python3 -I -B -m unittest discover -v -s .github/review-threads -t .github/review-threads
