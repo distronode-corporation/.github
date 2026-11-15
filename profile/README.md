@@ -50,15 +50,38 @@ say so on the page rather than rounding up. The technical detail is in the
 
 ## Open source
 
-District AI runs on open-source software, and we publish our own work the same way, under
-Apache-2.0. The apps are open source; the District AI service they talk to is not. All ten
-projects, and everything we run on, are on [one page](https://www.distronode.com/open-source).
+District AI runs on open-source software, and we publish our own work the same way, nearly
+all of it under Apache-2.0. The apps are open source; the District AI service they talk to is
+not. All fourteen projects, and everything we run on, are on
+[one page](https://www.distronode.com/open-source).
 
 **Without an account with us.** Today the apps need a District AI account to sign in. We want
 them to work without an account with us too. We have not worked out what that looks like or
 whether it can work, and the answer depends on what people would use them with, so we are
 asking before we build anything:
 [tell us what you would connect them to](https://github.com/distronode-corporation/.github/discussions/1).
+
+### Tools
+
+Each began as something we needed for our own work, and none needs a District AI account.
+
+- **[mcp-patchbay](https://github.com/distronode-corporation/mcp-patchbay)** hosts your other
+  MCP servers and lets the agent switch them on and off in the middle of a session. Servers
+  you mark confirm need a person's yes; servers you mark deny never start. On npm.
+- **[mcp-frontdesk](https://github.com/distronode-corporation/mcp-frontdesk)** is an OAuth 2.1
+  authorization server and bearer gate for MCP servers. It began as the sign-in layer of our
+  own MCP server. On npm.
+- **[worldinmotion](https://github.com/distronode-corporation/worldinmotion)** lets AI agent
+  sessions message each other across machines and accounts, end-to-end encrypted, through a
+  relay that cannot read the messages. It is a pre-release.
+- **[bridgewatch](https://github.com/distronode-corporation/bridgewatch)** is our tray monitor
+  for GitLab CI and GitHub Actions, for macOS and Linux. It shows one row per push with every
+  downstream pipeline under it, tells a scheduled pipeline from a push, and reports whether
+  the thing you care about actually deployed ([mirror](https://gitlab.com/distronode-corporation/bridgewatch)).
+- **[homebrew-tap](https://github.com/distronode-corporation/homebrew-tap)** is the Homebrew
+  tap for our macOS apps, District AI for Mac and bridgewatch, under BSD-2-Clause.
+
+### Apps
 
 - **[District AI for iOS](https://github.com/distronode-corporation/district-ios)** is the
   native iPhone and iPad app, on the App Store ([mirror](https://gitlab.com/distronode-corporation/district-ios)).
@@ -68,25 +91,23 @@ asking before we build anything:
 - **[District AI for Android](https://github.com/distronode-corporation/district-android)** is
   the native Android app, which calls through Android's own Telecom framework, on Google Play
   ([mirror](https://gitlab.com/distronode-corporation/district-android)).
-- **[District AI for Linux](https://github.com/distronode-corporation/district-linux)** is the
-  native desktop app in Rust with GTK 4 and libadwaita, released as a .deb and a Flatpak
-  ([mirror](https://gitlab.com/distronode-corporation/district-linux)).
 - **[District AI for Windows](https://github.com/distronode-corporation/district-windows)** is
   the native Windows app in C# and WinUI 3 over the shared Rust core, on the Microsoft Store
   ([mirror](https://gitlab.com/distronode-corporation/district-windows)).
+- **[District AI for Linux](https://github.com/distronode-corporation/district-linux)** is the
+  native desktop app in Rust with GTK 4 and libadwaita, released as a .deb and a Flatpak
+  ([mirror](https://gitlab.com/distronode-corporation/district-linux)).
+
+### Building blocks
+
 - **[District Core for Swift](https://github.com/distronode-corporation/district-core-swift)**
   is the Swift package the iPhone, iPad and Mac apps share: their models, sign-in, networking,
   data and call logic, tested on Linux as well as macOS ([mirror](https://gitlab.com/distronode-corporation/district-core-swift)).
 - **[District Core for Rust](https://github.com/distronode-corporation/district-core-rust)** is
   the Rust core the Linux and Windows apps share: data types, sign-in, networking and calls
   ([mirror](https://gitlab.com/distronode-corporation/district-core-rust)).
-- **[bridgewatch](https://github.com/distronode-corporation/bridgewatch)** is our tray monitor
-  for GitLab CI and GitHub Actions, for macOS and Linux. It shows one row per push with every
-  downstream pipeline under it, tells a scheduled pipeline from a push, and reports whether
-  the thing you care about actually deployed ([mirror](https://gitlab.com/distronode-corporation/bridgewatch)).
-- **[worldinmotion](https://github.com/distronode-corporation/worldinmotion)** lets AI agent
-  sessions message each other across machines and accounts, end-to-end encrypted, through a
-  relay that cannot read the messages. It is a pre-release.
+- **[updates](https://github.com/distronode-corporation/updates)** holds the Sparkle update
+  feeds for our apps.
 - **[District Scheduler](https://github.com/distronode-corporation/district-scheduler)** is our
   fork of [Calnode](https://github.com/Calnode/calnode), and the scheduling engine behind the
   booking page every District AI plan includes. It adds a multi-tenant mode on PostgreSQL,
@@ -97,7 +118,7 @@ asking before we build anything:
   deployment, not only ours. PostgreSQL and multi-tenancy were declined upstream on
   architectural grounds, so the fork carries them.
 
-Each project except District Scheduler and worldinmotion has a read-only mirror on
+The apps, the two cores and bridgewatch have read-only mirrors on
 [GitLab](https://gitlab.com/distronode-corporation); issues and pull requests live here on
 GitHub.
 
