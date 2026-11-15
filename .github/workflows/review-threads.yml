@@ -1,0 +1,69 @@
+name: Review threads
+
+# The organization's review threads check: a pull request is red while any review thread
+# on it is unresolved, from any author (a person or a review bot), outdated or not. Every
+# repository calls it from a small `.github/workflows/review-threads.yml` of its own,
+# pinned to a commit of this repository:
+#
+#   uses: distronode-corporation/.github/.github/workflows/review-threads.yml@<sha>
+#
+# The code is `.github/review-threads/review_threads.py`.
+#
+# The verdict is ONE commit status on the pull request's head commit, context
+# `review-threads`, never this job's own result. Why a status and not a check run:
+# - GitHub has no event for a thread being resolved, so a scheduled run has to turn a red
+#   pull request green. A scheduled run belongs to the default branch: its job's check run
+#   lands on the default branch's head commit, never on the pull request. Only a write
+#   aimed at the pull request's head commit reaches it.
+# - A commit status is keyed by its context alone, and the newest one for a context is the
+#   one that counts. So the pull request event's run and the scheduled run write the same
+#   thing, and whichever ran last wins. A check run written through the API is a separate
+#   check run beside the job's own, and a required name matches every check run and status
+#   of that name ("both must pass"), so an earlier red one would stay red.
+# - The job itself never fails on a verdict (only when it could not read or write), so its
+#   own check run ("review threads / record" in the caller) is never a stale red.
+# The ruleset requires the status context `review-threads`. Its source is GitHub Actions,
+# the app behind the GITHUB_TOKEN that writes it.
+#
+# A fork's pull request runs with a read-only token: the run reads the threads, logs and
+# summarizes the verdict, and writes nothing. The next scheduled run records the status.
+# Until then the required status is missing (which blocks a merge) or is the previous
+# verdict, so a fork's run with an unresolved thread also fails its own job, and the new
+# thread shows as a red check at once.
+#
+# The scheduled pass works in a random order within a time budget, so a repository with
+# many open pull requests never starves the same ones.
+#
+# Safe on untrusted text by construction: nothing from the caller's repository is checked
+# out or run. The only checkout is this repository, at the exact commit the caller pinned
+# (`job.workflow_sha`). No event text is expanded into a `run:` line or an `env:` value;
+# the script reads the event from GITHUB_EVENT_PATH and the threads from the API.
+on:
+  workflow_call:
+
+# Nothing at the top level; the job asks for exactly what it needs, and a called workflow
+# can never get more than its caller grants.
+permissions: {}
+
+jobs:
+  record:
+    name: record
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # check out this repository's script
+      pull-requests: read # list open pull requests; read their review threads
+      statuses: write # the `review-threads` commit status on each head commit
+    steps:
+      - name: Check out the script (this repository, at the pinned commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/review-threads
+
+      - name: Read the review threads and write the status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I -B .github/review-threads/review_threads.py
