@@ -109,7 +109,8 @@ def pr_payload(number: int = 1, head_repo: str = REPO, sha: str = "a" * 40) -> d
 
 def go(fake: Fake, event: str = "pull_request", payload: dict[str, Any] | None = None) -> tuple[int, str, list[str]]:
     lines: list[str] = []
-    status, text = rt.run(fake.graphql, fake.get, fake.post, event, payload if payload is not None else pr_payload(), REPO, RUN, lines.append)
+    status, text = rt.run(fake.graphql, fake.get, fake.post, event, payload if payload is not None else pr_payload(), REPO, RUN, lines.append,
+                          shuffle=lambda xs: None)
     return status, text, lines
 
 
@@ -122,8 +123,9 @@ class Verdicts(unittest.TestCase):
         self.assertEqual(path, f"/repos/{REPO}/statuses/{'a' * 40}")
         self.assertEqual(body, {"state": "failure", "context": "review-threads",
                                 "description": "1 unresolved review thread", "target_url": RUN})
-        self.assertIn("seer-by-sentry[bot]", text)
-        self.assertIn("`a.py:3`", text)
+        self.assertIn("seer\\-by\\-sentry\\[bot\\]", text)
+        self.assertIn("| a\\.py:3 |", text)
+        self.assertIn("| 1 (seer\\-by\\-sentry\\[bot\\]) | [open](https://github.com/octo/repo/pull/1#c) |", text)
         self.assertIn("Bug here", text)
         self.assertNotIn("more", text)
 
@@ -144,7 +146,7 @@ class Verdicts(unittest.TestCase):
         fake = Fake({1: [[thread("t1", False, outdated=True, line=None, original=9)]]})
         _, text, _ = go(fake)
         self.assertEqual(fake.posts[0][1]["state"], "failure")
-        self.assertIn("a.py:9 (outdated)", text)
+        self.assertIn("a\\.py:9 \\(outdated\\)", text)
 
     def test_human_and_ghost_authors_count(self) -> None:
         fake = Fake({1: [[thread("t1", False, comments=[comment("alice", "nit")]),
@@ -152,7 +154,7 @@ class Verdicts(unittest.TestCase):
         _, text, _ = go(fake)
         self.assertEqual(fake.posts[0][1]["description"], "2 unresolved review threads")
         self.assertIn("| alice |", text)
-        self.assertIn("| ghost | `(pull request)` | (empty) |", text)
+        self.assertIn("| ghost | \\(pull request\\) | \\(empty\\) | 1 (ghost) | [open]", text)
 
     def test_thread_without_comments(self) -> None:
         fake = Fake({1: [[thread("t1", False, comments=[])]]})
@@ -176,12 +178,26 @@ class Verdicts(unittest.TestCase):
         self.assertEqual(v.open_threads[0].last_author, "carol")
         self.assertEqual(v.open_threads[0].author, "seer-by-sentry[bot]")
 
+    def test_review_text_is_plain_text_in_the_summary(self) -> None:
+        hostile = "[click](https://evil.example) <img src=x onerror=1> **b** `c` | d &amp;"
+        url = "javascript:alert(1)"
+        fake = Fake({1: [[thread("t1", False, comments=[comment("u", hostile, url)], path="x`y|z.py")]]})
+        _, text, _ = go(fake)
+        row = [l for l in text.splitlines() if l.startswith("| u ")][0]
+        self.assertIn("\\[click\\]\\(https://evil\\.example\\)", row)
+        self.assertIn("&lt;img src=x onerror=1&gt;", row)
+        self.assertIn("\\*\\*b\\*\\*", row)
+        self.assertIn("x\\`y\\|z\\.py", row)
+        self.assertIn("&amp;amp;", row)
+        self.assertNotIn("javascript", row)
+        self.assertNotIn("<", row)
+
     def test_pipes_and_long_lines_are_escaped_and_cut(self) -> None:
         body = "a|b " + "x" * 300
         fake = Fake({1: [[thread("t1", False, comments=[comment("u", "\n\n" + body)])]]})
         _, text, _ = go(fake)
         self.assertIn("a\\|b", text)
-        self.assertIn("...", text)
+        self.assertIn("\\.\\.\\. |", text)
         self.assertEqual(len(rt.first_line(body)), 120)
 
 
@@ -216,11 +232,18 @@ class Events(unittest.TestCase):
     def test_fork_event_run_reports_without_writing(self) -> None:
         fake = Fake({1: [[thread("t1", False)]]}, fork=True)
         status, text, lines = go(fake, payload=pr_payload(head_repo="someone/fork"))
-        self.assertEqual(status, 0)
+        self.assertEqual(status, 1)
         self.assertEqual(fake.posts, [])
+        self.assertIn("::error::#1: 1 unresolved review thread.", lines)
         self.assertTrue(any(l.startswith("::warning::") for l in lines))
         self.assertIn("next scheduled run", text)
         self.assertIn("1 unresolved review thread", text)
+
+    def test_fork_event_run_with_nothing_open_passes(self) -> None:
+        fake = Fake({1: [[thread("t1", True)]]}, fork=True)
+        status, _, _ = go(fake, payload=pr_payload(head_repo="someone/fork"))
+        self.assertEqual(status, 0)
+        self.assertEqual(fake.posts, [])
 
 
 class Failures(unittest.TestCase):
@@ -255,6 +278,12 @@ class Failures(unittest.TestCase):
         self.assertEqual(len(fake.posts), 1)
         self.assertIn("#1: could not read", text)
 
+    def test_every_read_failing_is_not_reported_as_no_pull_requests(self) -> None:
+        fake = Fake({}, pr_pages=[[1]])
+        status, text, _ = go(fake, "schedule", {})
+        self.assertEqual(status, 1)
+        self.assertNotIn("No open pull requests.", text)
+
     def test_list_failure(self) -> None:
         fake = Fake({})
         def boom(q: str, v: dict[str, Any]) -> dict[str, Any]:
@@ -274,12 +303,13 @@ class Failures(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("could not write", text)
 
-    def test_write_refused_in_sweep_warns_only(self) -> None:
-        fake = Fake({1: [[]]})
+    def test_write_refused_in_sweep_fails_and_continues(self) -> None:
+        fake = Fake({1: [[]], 2: [[]]})
         fake.fail_post = rt.ApiError("HTTP 403")
-        status, _, lines = go(fake, "schedule", {})
-        self.assertEqual(status, 0)
-        self.assertTrue(any(l.startswith("::warning::") for l in lines))
+        status, text, lines = go(fake, "schedule", {})
+        self.assertEqual(status, 1)
+        self.assertEqual(sum(l.startswith("::error::") for l in lines), 2)
+        self.assertNotIn("No open pull requests.", text)
 
     def test_head_moves_between_pages(self) -> None:
         fake = Fake({1: [[thread("t1", True)], [thread("t2", True)]]})
@@ -443,6 +473,30 @@ class Main(unittest.TestCase):
             os.environ.update(old)
         with open(summ) as f:
             self.assertIn("No open pull requests.", f.read())
+
+
+class Budget(unittest.TestCase):
+    def test_sweep_stops_cleanly_when_out_of_time(self) -> None:
+        fake = Fake({1: [[]], 2: [[]], 3: [[]]})
+        ticks = iter([0.0, 1.0, rt.TIME_BUDGET + 1])
+        lines: list[str] = []
+        status, text = rt.run(fake.graphql, fake.get, fake.post, "schedule", {}, REPO, RUN, lines.append,
+                              clock=lambda: next(ticks), shuffle=lambda xs: xs.reverse())
+        self.assertEqual(status, 0)
+        self.assertEqual(len(fake.posts), 1)
+        self.assertIn("threads:3:None", fake.calls)
+        self.assertNotIn("threads:1:None", fake.calls)
+        self.assertIn("Out of time with 2 left", text)
+        ticks = iter([0.0, 1.0, 2.0, rt.TIME_BUDGET + 1])
+        rt.run(fake.graphql, fake.get, fake.post, "schedule", {}, REPO, RUN, lines.append,
+               clock=lambda: next(ticks), shuffle=lambda xs: None)
+        self.assertTrue(any("1 pull request left" in l for l in lines))
+
+    def test_sweep_order_is_shuffled(self) -> None:
+        fake = Fake({1: [[]], 2: [[]]})
+        seen: list[list[int]] = []
+        rt.run(fake.graphql, fake.get, fake.post, "schedule", {}, REPO, RUN, lambda s: None, shuffle=lambda xs: seen.append(list(xs)))
+        self.assertEqual(seen, [[1, 2]])
 
 
 class Description(unittest.TestCase):

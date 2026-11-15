@@ -27,7 +27,12 @@ name: Review threads
 #
 # A fork's pull request runs with a read-only token: the run reads the threads, logs and
 # summarizes the verdict, and writes nothing. The next scheduled run records the status.
-# Until then the required status is missing, which blocks a merge.
+# Until then the required status is missing (which blocks a merge) or is the previous
+# verdict, so a fork's run with an unresolved thread also fails its own job, and the new
+# thread shows as a red check at once.
+#
+# The scheduled pass works in a random order within a time budget, so a repository with
+# many open pull requests never starves the same ones.
 #
 # Safe on untrusted text by construction: nothing from the caller's repository is checked
 # out or run. The only checkout is this repository, at the exact commit the caller pinned

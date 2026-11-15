@@ -20,13 +20,15 @@ supersedes an earlier one, whichever event started it. A verdict the commit alre
 carries is not written again (GitHub keeps at most 1000 statuses per commit and context).
 
 The job itself does not fail on a verdict, so its own check run is never a stale red. It
-exits 1 only when it could not do its work (an API error, or a status write refused on a
-pull request from this repository); a status of `error` is then written where possible.
+exits 1 only when it could not do its work (an API error, or a refused status write); a
+status of `error` is then written where possible.
 
 A fork's pull request runs with a read-only token, so its event runs cannot write the
 status: they log and summarize the verdict, and the next scheduled run (from this
-repository, with a writable token) records it. Until then the required status is missing,
-which blocks a merge rather than allowing one.
+repository, with a writable token) records it. Until then the required status is missing
+(which blocks a merge) or is the previous verdict. So that a new unresolved thread is never
+hidden behind an earlier green status, a fork's event run with an unresolved thread fails
+its own job.
 
 The step summary lists every unresolved thread: author, file:line, the first line of its
 first comment, and a link.
@@ -36,7 +38,10 @@ from __future__ import annotations
 
 import json
 import os
+import random
+import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -45,6 +50,9 @@ from typing import Any, Callable
 CONTEXT = "review-threads"
 API = "https://api.github.com"
 MAX_PAGES = 50
+# Seconds of work per run; the job's timeout is 5 minutes. A sweep that runs out stops
+# cleanly, and the next sweep (in a new random order) carries on.
+TIME_BUDGET = 210.0
 PR_EVENTS = {"pull_request", "pull_request_review", "pull_request_review_comment"}
 
 THREADS_QUERY = """
@@ -291,26 +299,37 @@ def record(get: Get, post: Post, repo: str, sha: str, state: str, description: s
     return True
 
 
+# Review text is untrusted: in the step summary it is plain text, never Markdown or HTML.
+_MD_SPECIAL = set("\\`*_{}[]()#+-.!|~>")
+_LINK = re.compile(r"https://github\.com/[\w.\-]+/[\w.\-]+/pull/\d+#[\w\-]+")
+
+
 def _cell(text: str) -> str:
-    return text.replace("|", "\\|").replace("\n", " ")
+    text = " ".join(text.split())
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return "".join("\\" + c if c in _MD_SPECIAL else c for c in text)
+
+
+def _link(url: str) -> str:
+    return f"[open]({url})" if _LINK.fullmatch(url) else ""
 
 
 def summary(verdicts: list[Verdict], notes: list[str]) -> str:
     out = ["## Review threads", ""]
-    if not verdicts:
+    if not verdicts and not notes:
         out.append("No open pull requests.")
     for v in verdicts:
         out.append(f"### #{v.number} ({v.sha[:12]}): {v.description}")
         out.append("")
         if v.open_threads:
-            out.append("| author | file:line | first line | link |")
-            out.append("|---|---|---|---|")
+            out.append("| author | file:line | first line | comments (last by) | link |")
+            out.append("|---|---|---|---|---|")
             for t in v.open_threads:
                 where = f"{t.path}:{t.line}" if t.line else (t.path or "(pull request)")
                 if t.outdated:
                     where += " (outdated)"
-                link = f"[open]({t.url})" if t.url else ""
-                out.append(f"| {_cell(t.author)} | `{_cell(where)}` | {_cell(t.first_line)} | {link} |")
+                last = f"{t.comments} ({_cell(t.last_author)})"
+                out.append(f"| {_cell(t.author)} | {_cell(where)} | {_cell(t.first_line)} | {last} | {_link(t.url)} |")
             out.append("")
     if notes:
         out += ["", *[f"- {n}" for n in notes]]
@@ -326,8 +345,11 @@ def run(
     repo: str,
     run_url: str,
     out: Callable[[str], None] = print,
+    clock: Callable[[], float] = time.monotonic,
+    shuffle: Callable[[list[int]], None] = random.shuffle,
 ) -> tuple[int, str]:
     """Evaluate and record. Returns (exit status, step summary)."""
+    deadline = clock() + TIME_BUDGET
     notes: list[str] = []
     verdicts: list[Verdict] = []
     failed = False
@@ -340,7 +362,15 @@ def run(
         except ApiError as e:
             out(f"::error::Could not list the open pull requests: {e}")
             return 1, summary([], [f"Could not list the open pull requests: {e}"])
-    for number in numbers:
+        # A random order, so a sweep that runs out of time never starves the same pull
+        # requests twice in a row.
+        shuffle(numbers)
+    for i, number in enumerate(numbers):
+        if clock() > deadline:
+            rest = len(numbers) - i
+            out(f"::warning::Out of time with {rest} pull request{'s' if rest != 1 else ''} left; the next sweep carries on.")
+            notes.append(f"Out of time with {rest} left; the next sweep carries on.")
+            break
         try:
             v = read_pr(gql, repo, number)
         except ApiError as e:
@@ -360,9 +390,15 @@ def run(
         for t in v.open_threads:
             out(f"  open: {t.author} {t.path}:{t.line} {t.url}")
         if pr and v.fork:
+            # This run cannot replace the status, so an earlier green one could stand until
+            # the next sweep. A red verdict therefore fails this job, so the pull request
+            # shows a red check at once; the sweep then writes the status.
             out(f"::warning::#{number} is from a fork, so this run's token is read-only and cannot write the "
                 f"'{CONTEXT}' status. The next scheduled run records it.")
             notes.append(f"#{number} is from a fork: the `{CONTEXT}` status is written by the next scheduled run.")
+            if v.open_threads:
+                failed = True
+                out(f"::error::#{number}: {v.description}.")
             continue
         try:
             # Read again after the write: a run that read a moment before another run wrote
@@ -376,11 +412,8 @@ def run(
                 out(f"#{number}: the verdict changed while it was written; writing it again")
                 verdicts[-1] = v = again
         except ApiError as e:
-            if pr:
-                failed = True
-                out(f"::error::#{number}: could not write the '{CONTEXT}' status: {e}")
-            else:
-                out(f"::warning::#{number}: could not write the '{CONTEXT}' status: {e}")
+            failed = True
+            out(f"::error::#{number}: could not write the '{CONTEXT}' status: {e}")
             notes.append(f"#{number}: could not write the `{CONTEXT}` status ({e}).")
     return (1 if failed else 0), summary(verdicts, notes)
 
