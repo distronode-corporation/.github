@@ -6,11 +6,19 @@
 
 # Distronode Corporation
 
+*The whole front door, answered in your region.*
+
 **A Canadian telecommunications company. We provide business phone numbers, calls and texts in Canada, the United States and Europe, and we build [District AI](https://www.distronode.com), the 24/7 receptionist that answers them.**
 
 Pick a local number or keep the one your customers already know. Every call is answered, the
 appointment is booked, and the call is written up afterward. No gated sales call and no form:
-the live demo on our site answers in your browser right now.
+[Try District](https://www.distronode.com/try-district) lets you call a sample business and
+then run it, in your browser, right now.
+
+Buy it from us at [distronode.com](https://www.distronode.com), on
+[Microsoft Marketplace](https://marketplace.microsoft.com/en-us/product/saas/distronode.district-ai)
+with Microsoft billing you, or through an IT provider in Microsoft's Cloud Solution Provider
+program.
 
 ## What it does
 
@@ -52,7 +60,7 @@ say so on the page rather than rounding up. The technical detail is in the
 
 District AI runs on open-source software, and we publish our own work the same way, nearly
 all of it under Apache-2.0. The apps are open source; the District AI service they talk to is
-not. All fourteen projects, and everything we run on, are on
+not. All fifteen projects, and everything we run on, are on
 [one page](https://www.distronode.com/open-source).
 
 **Without an account with us.** Today the apps need a District AI account to sign in. We want
@@ -78,6 +86,10 @@ Each began as something we needed for our own work, and none needs a District AI
   for GitLab CI and GitHub Actions, for macOS and Linux. It shows one row per push with every
   downstream pipeline under it, tells a scheduled pipeline from a push, and reports whether
   the thing you care about actually deployed ([mirror](https://gitlab.com/distronode-corporation/bridgewatch)).
+- **[district-social](https://github.com/distronode-corporation/district-social)** is an engine
+  and command-line client for social posts. It turns one post into a version for each of ten
+  networks, checks every version against that network's limits, and publishes through each
+  network's own API. It is built to publish only what a person has approved. On npm.
 - **[homebrew-tap](https://github.com/distronode-corporation/homebrew-tap)** is the Homebrew
   tap for our macOS apps, District AI for Mac and bridgewatch, under BSD-2-Clause.
 
