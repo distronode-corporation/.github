@@ -1,7 +1,8 @@
 # Governance
 
 This file says how the open-source projects of Distronode Corporation are run: who decides,
-how a change gets in, who does what, and what happens when someone reports a vulnerability.
+how a change gets in, who does what, what happens when someone reports a vulnerability, and
+what happens if a maintainer is no longer available.
 It is the organization's default, so it applies to every repository here that does not have a
 GOVERNANCE.md of its own. Where a repository's own CONTRIBUTING.md or SECURITY.md says more,
 that file is the detail and this one is the summary.
@@ -123,6 +124,38 @@ gets a new patch version. What a release is signed with, and how to verify it, d
 where it is published (a build provenance attestation checked with `gh attestation verify`,
 npm provenance, or the platform's own code signing), and the repository's documentation is
 where that is described.
+
+## Continuity
+
+No project here depends on one person's account. The `distronode-corporation` GitHub
+organization has three owners: `seandean`, the maintainer who holds the code owner role;
+`distronode-com`, the organization's own account; and `distronode-legal`, held by Distronode
+Corporation's legal function (legal@distronode.com). An owner can give write access, change a
+repository's CODEOWNERS file and rulesets, and run its workflows, so if the maintainer is lost
+or unavailable, Distronode Corporation can, within one week, create and close issues, name a
+new code owner, accept changes and make a release.
+
+Making a release needs no personal credential. Each repository's release workflow publishes
+with what the workflow itself is given, never with someone's own login, and the repository's
+documentation has the steps. What each one publishes with:
+
+- **npm packages** (worldinmotion, district-social, mcp-patchbay, mcp-frontdesk): npm trusted
+  publishing. npm exchanges the workflow's OIDC token for a one-time publish token, so no npm
+  token is stored anywhere. worldinmotion and mcp-patchbay also publish to the MCP Registry,
+  signed in with the same OIDC token, and worldinmotion's own GOVERNANCE.md covers its editor
+  marketplaces.
+- **GitHub releases, signed tags and container images** (bridgewatch, district-linux,
+  district-windows, district-core-rust, district-core-swift, district-scheduler, and the files
+  and images worldinmotion and mcp-patchbay attach): the workflow's own repository token, and
+  keyless Sigstore signing under the workflow's OIDC identity for attestations and signed tags,
+  so no signing key is held by a person. district-core-rust and district-core-swift tag from
+  their release workflow and an owner then creates the GitHub release by hand.
+- **App stores and platform code signing** (district-android, district-ios, district-macos,
+  the Microsoft Store submission of district-windows, and the macOS build of bridgewatch): the
+  signing keys and store credentials are stored for the release workflow, which reads them
+  when it runs, so running it needs no one's own device or login. A submission for review also
+  needs the maintainers' approval, given when the workflow is started, and the store then
+  reviews it.
 
 ## Changing this document
 
