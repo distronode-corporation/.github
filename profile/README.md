@@ -8,43 +8,62 @@
 
 *The whole front door, answered in your region.*
 
-**A Canadian telecommunications company. We provide business phone numbers, calls and texts in Canada, the United States and Europe, and we build [District AI](https://www.distronode.com), the 24/7 receptionist that answers them.**
+**A Canadian telecommunications company.** We provide business phone numbers, calls and texts in
+Canada, the United States and Europe, and we build [District AI](https://www.distronode.com), the
+24/7 receptionist that answers them: it picks up, books the appointment while the caller is on the
+line, and writes up every call. Four independent regional deployments (United States, Canada,
+Europe, Asia-Pacific), each with its own database, and native apps on every platform.
 
-Pick a local number or keep the one your customers already know. Every call is answered, the
-appointment is booked, and the call is written up afterward. No gated sales call and no form:
-[Try District](https://www.distronode.com/try-district) lets you call a sample business and
-then run it, in your browser, right now.
+[distronode.com](https://www.distronode.com) · [Try District](https://www.distronode.com/try-district) · [Sovereign portal](https://www.distronode.com/sovereign) · [Open source](https://www.distronode.com/open-source)
 
-Buy it from us at [distronode.com](https://www.distronode.com), on
-[Microsoft Marketplace](https://marketplace.microsoft.com/en-us/product/saas/distronode.district-ai)
-with Microsoft billing you, or through an IT provider in Microsoft's Cloud Solution Provider
-program.
+## Open source
 
-## What it does
+We publish our own work in the open, nearly all of it under Apache-2.0. The apps are open source;
+the District AI service they talk to is not.
 
-- **Answers the phone**, in a voice you choose, with an opening line you write and approve.
-- **Books the appointment** while the caller is still on the line, and gives you a booking
-  page of your own that works with Google Calendar, Microsoft 365 and Apple Calendar.
-- **Writes up every call**: who called, what they wanted, and the full transcript.
-- **Priced in the open.** Plans from $39 a month, per-minute rates published, and spending
-  caps you set.
+### Tools
 
-## How it is built
+None of these needs a District AI account.
 
-Our own phone infrastructure, run like a phone company.
+| Project | What it is | Status |
+|---|---|---|
+| [**worldinmotion**](https://github.com/distronode-corporation/worldinmotion) | End-to-end encrypted, real-time messaging between AI agent sessions across machines and accounts, through a relay that cannot read the messages. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15869/badge)](https://www.bestpractices.dev/projects/15869) [![Release](https://img.shields.io/github/v/release/distronode-corporation/worldinmotion?label=release)](https://github.com/distronode-corporation/worldinmotion/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/worldinmotion)](https://github.com/distronode-corporation/worldinmotion/blob/main/LICENSE) |
+| [**mcp-patchbay**](https://github.com/distronode-corporation/mcp-patchbay) | An MCP server that hosts your other MCP servers and lets the agent switch them on and off mid-session. Confirm servers need a person's yes; deny servers never start. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16485/badge)](https://www.bestpractices.dev/projects/16485) [![Release](https://img.shields.io/github/v/release/distronode-corporation/mcp-patchbay?label=release)](https://github.com/distronode-corporation/mcp-patchbay/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/mcp-patchbay)](https://github.com/distronode-corporation/mcp-patchbay/blob/main/LICENSE) |
+| [**mcp-frontdesk**](https://github.com/distronode-corporation/mcp-frontdesk) | OAuth 2.1 authorization server and token check for MCP servers. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16702/badge)](https://www.bestpractices.dev/projects/16702) [![Release](https://img.shields.io/github/v/release/distronode-corporation/mcp-frontdesk?label=release)](https://github.com/distronode-corporation/mcp-frontdesk/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/mcp-frontdesk)](https://github.com/distronode-corporation/mcp-frontdesk/blob/main/LICENSE) |
+| [**bridgewatch**](https://github.com/distronode-corporation/bridgewatch) | Tray monitor for GitLab CI and GitHub Actions on macOS and Linux: one row per push, every downstream pipeline, and whether it actually deployed. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15887/badge)](https://www.bestpractices.dev/projects/15887) [![Release](https://img.shields.io/github/v/release/distronode-corporation/bridgewatch?label=release)](https://github.com/distronode-corporation/bridgewatch/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/bridgewatch)](https://github.com/distronode-corporation/bridgewatch/blob/main/LICENSE) |
+| [**district-social**](https://github.com/distronode-corporation/district-social) | An open-source engine and CLI that formats, checks and publishes social posts across ten networks. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16830/badge)](https://www.bestpractices.dev/projects/16830) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-social?label=release)](https://github.com/distronode-corporation/district-social/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-social)](https://github.com/distronode-corporation/district-social/blob/main/LICENSE) |
 
-| | |
-|---|---|
-| **Voice** | LiveKit for live calls, on our own servers in every region |
-| **Telephony** | Direct carrier connections, with local numbers in the United States, Canada and Europe |
-| **Regions** | Four independent deployments (United States, Canada, Europe, Asia-Pacific), each with its own database |
-| **Apps** | Web, plus native iOS, Android, Mac, Windows and Linux |
+### Apps
 
-**Where your data lives is a property of the deployment, not a promise in a brochure.** We
-publish a map of where each kind of data is kept, alongside the companies that help us run
-the service and our privacy commitments. Where something is *not* kept in your region, we
-say so on the page rather than rounding up. The technical detail is in the
-[Sovereign portal](https://www.distronode.com/sovereign).
+| Project | What it is | Status |
+|---|---|---|
+| [**District AI for iOS**](https://github.com/distronode-corporation/district-ios) | The native iPhone and iPad app (SwiftUI), on the App Store. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15870/badge)](https://www.bestpractices.dev/projects/15870) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-ios?label=release)](https://github.com/distronode-corporation/district-ios/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-ios)](https://github.com/distronode-corporation/district-ios/blob/main/LICENSE) |
+| [**District AI for Mac**](https://github.com/distronode-corporation/district-macos) | The native SwiftUI Mac app, on the Mac App Store, as a notarised download and through Homebrew. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15871/badge)](https://www.bestpractices.dev/projects/15871) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-macos?label=release)](https://github.com/distronode-corporation/district-macos/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-macos)](https://github.com/distronode-corporation/district-macos/blob/main/LICENSE) |
+| [**District AI for Android**](https://github.com/distronode-corporation/district-android) | The native Android app (Kotlin, Jetpack Compose), on Google Play. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15873/badge)](https://www.bestpractices.dev/projects/15873) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-android?label=release)](https://github.com/distronode-corporation/district-android/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-android)](https://github.com/distronode-corporation/district-android/blob/main/LICENSE) |
+| [**District AI for Windows**](https://github.com/distronode-corporation/district-windows) | The native WinUI 3 app in C# over the shared Rust core, on the Microsoft Store. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15875/badge)](https://www.bestpractices.dev/projects/15875) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-windows?label=release)](https://github.com/distronode-corporation/district-windows/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-windows)](https://github.com/distronode-corporation/district-windows/blob/main/LICENSE) |
+| [**District AI for Linux**](https://github.com/distronode-corporation/district-linux) | The native GTK 4 and libadwaita app in Rust, released as a .deb and a Flatpak. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15874/badge)](https://www.bestpractices.dev/projects/15874) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-linux?label=release)](https://github.com/distronode-corporation/district-linux/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-linux)](https://github.com/distronode-corporation/district-linux/blob/main/LICENSE) |
+
+### Building blocks
+
+| Project | What it is | Status |
+|---|---|---|
+| [**District Core for Swift**](https://github.com/distronode-corporation/district-core-swift) | The Swift core the iOS and macOS apps share: models, sign-in, networking, data, calls and live telemetry. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15872/badge)](https://www.bestpractices.dev/projects/15872) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-core-swift?label=release)](https://github.com/distronode-corporation/district-core-swift/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-core-swift)](https://github.com/distronode-corporation/district-core-swift/blob/main/LICENSE) |
+| [**District Core for Rust**](https://github.com/distronode-corporation/district-core-rust) | The Rust core the Linux and Windows apps share: data types, sign-in, networking and calls. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15876/badge)](https://www.bestpractices.dev/projects/15876) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-core-rust?label=release)](https://github.com/distronode-corporation/district-core-rust/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-core-rust)](https://github.com/distronode-corporation/district-core-rust/blob/main/LICENSE) |
+| [**District Scheduler**](https://github.com/distronode-corporation/district-scheduler) | Our fork of Calnode (Apache-2.0) with an opt-in multi-tenant mode: the scheduling engine behind every District AI plan's booking page. | [![License](https://img.shields.io/github/license/distronode-corporation/district-scheduler)](https://github.com/distronode-corporation/district-scheduler/blob/main/LICENSE) |
+
+**Infrastructure:** [updates](https://github.com/distronode-corporation/updates) (Sparkle update feeds),
+[homebrew-tap](https://github.com/distronode-corporation/homebrew-tap) (Homebrew tap for our macOS apps, BSD-2-Clause),
+[coderabbit](https://github.com/distronode-corporation/coderabbit) and [cubic-config](https://github.com/distronode-corporation/cubic-config)
+(organization-wide review-bot settings), and two upstream forks,
+[plugins-workspace](https://github.com/distronode-corporation/plugins-workspace) and
+[zbus-secret-service-keyring-store](https://github.com/distronode-corporation/zbus-secret-service-keyring-store).
+
+The apps, the two cores and bridgewatch have read-only mirrors on
+[GitLab](https://gitlab.com/distronode-corporation); issues and pull requests live here on GitHub.
+Contributions are authored with AI assistance under human review, and our commits say so.
+
+Today the apps need a District AI account to sign in. We would like them to work without one too:
+[tell us what you would connect them to](https://github.com/distronode-corporation/.github/discussions/1).
 
 ## Get the apps
 
@@ -52,89 +71,12 @@ say so on the page rather than rounding up. The technical detail is in the
 - **Android:** [Google Play](https://play.google.com/store/apps/details?id=com.distronode.districtai)
 - **Windows:** [Microsoft Store](https://apps.microsoft.com/detail/9P9F0NNFJ3CP)
 - **Mac:** the [Mac App Store](https://apps.apple.com/app/id6809297970?platform=mac), a signed, notarised download on [GitHub Releases](https://github.com/distronode-corporation/district-macos/releases/latest),
-  or `brew install distronode-corporation/tap/district-ai` from our
-  [Homebrew tap](https://github.com/distronode-corporation/homebrew-tap)
+  or `brew install distronode-corporation/tap/district-ai`
 - **Linux:** a .deb and a Flatpak on [GitHub Releases](https://github.com/distronode-corporation/district-linux/releases/latest)
 
-## Open source
-
-District AI runs on open-source software, and we publish our own work the same way, nearly
-all of it under Apache-2.0. The apps are open source; the District AI service they talk to is
-not. All fifteen projects, and everything we run on, are on
-[one page](https://www.distronode.com/open-source).
-
-**Without an account with us.** Today the apps need a District AI account to sign in. We want
-them to work without an account with us too. We have not worked out what that looks like or
-whether it can work, and the answer depends on what people would use them with, so we are
-asking before we build anything:
-[tell us what you would connect them to](https://github.com/distronode-corporation/.github/discussions/1).
-
-### Tools
-
-Each began as something we needed for our own work, and none needs a District AI account.
-
-- **[mcp-patchbay](https://github.com/distronode-corporation/mcp-patchbay)** hosts your other
-  MCP servers and lets the agent switch them on and off in the middle of a session. Servers
-  you mark confirm need a person's yes; servers you mark deny never start. On npm.
-- **[mcp-frontdesk](https://github.com/distronode-corporation/mcp-frontdesk)** is an OAuth 2.1
-  authorization server and bearer gate for MCP servers. It began as the sign-in layer of our
-  own MCP server. On npm.
-- **[worldinmotion](https://github.com/distronode-corporation/worldinmotion)** lets AI agent
-  sessions message each other across machines and accounts, end-to-end encrypted, through a
-  relay that cannot read the messages. It is a pre-release.
-- **[bridgewatch](https://github.com/distronode-corporation/bridgewatch)** is our tray monitor
-  for GitLab CI and GitHub Actions, for macOS and Linux. It shows one row per push with every
-  downstream pipeline under it, tells a scheduled pipeline from a push, and reports whether
-  the thing you care about actually deployed ([mirror](https://gitlab.com/distronode-corporation/bridgewatch)).
-- **[district-social](https://github.com/distronode-corporation/district-social)** is an engine
-  and command-line client for social posts. It turns one post into a version for each of ten
-  networks, checks every version against that network's limits, and publishes through each
-  network's own API. It is built to publish only what a person has approved. On npm.
-- **[homebrew-tap](https://github.com/distronode-corporation/homebrew-tap)** is the Homebrew
-  tap for our macOS apps, District AI for Mac and bridgewatch, under BSD-2-Clause.
-
-### Apps
-
-- **[District AI for iOS](https://github.com/distronode-corporation/district-ios)** is the
-  native iPhone and iPad app, on the App Store ([mirror](https://gitlab.com/distronode-corporation/district-ios)).
-- **[District AI for Mac](https://github.com/distronode-corporation/district-macos)** is the
-  native SwiftUI Mac app, on the Mac App Store and released as a signed, notarised download and through Homebrew
-  ([mirror](https://gitlab.com/distronode-corporation/district-macos)).
-- **[District AI for Android](https://github.com/distronode-corporation/district-android)** is
-  the native Android app, which calls through Android's own Telecom framework, on Google Play
-  ([mirror](https://gitlab.com/distronode-corporation/district-android)).
-- **[District AI for Windows](https://github.com/distronode-corporation/district-windows)** is
-  the native Windows app in C# and WinUI 3 over the shared Rust core, on the Microsoft Store
-  ([mirror](https://gitlab.com/distronode-corporation/district-windows)).
-- **[District AI for Linux](https://github.com/distronode-corporation/district-linux)** is the
-  native desktop app in Rust with GTK 4 and libadwaita, released as a .deb and a Flatpak
-  ([mirror](https://gitlab.com/distronode-corporation/district-linux)).
-
-### Building blocks
-
-- **[District Core for Swift](https://github.com/distronode-corporation/district-core-swift)**
-  is the Swift package the iPhone, iPad and Mac apps share: their models, sign-in, networking,
-  data and call logic, tested on Linux as well as macOS ([mirror](https://gitlab.com/distronode-corporation/district-core-swift)).
-- **[District Core for Rust](https://github.com/distronode-corporation/district-core-rust)** is
-  the Rust core the Linux and Windows apps share: data types, sign-in, networking and calls
-  ([mirror](https://gitlab.com/distronode-corporation/district-core-rust)).
-- **[updates](https://github.com/distronode-corporation/updates)** holds the Sparkle update
-  feeds for our apps.
-- **[District Scheduler](https://github.com/distronode-corporation/district-scheduler)** is our
-  fork of [Calnode](https://github.com/Calnode/calnode), and the scheduling engine behind the
-  booking page every District AI plan includes. It adds a multi-tenant mode on PostgreSQL,
-  with row-level security as the isolation, and District AI's branding. Switched off, each instance serves one
-  workspace, as upstream Calnode does.
-- **Fixes go upstream.** Our fixes for event-type duplication, booking-page clarity, calendar
-  reconnection and locale handling are merged into Calnode and ship to every Calnode
-  deployment, not only ours. PostgreSQL and multi-tenancy were declined upstream on
-  architectural grounds, so the fork carries them.
-
-The apps, the two cores and bridgewatch have read-only mirrors on
-[GitLab](https://gitlab.com/distronode-corporation); issues and pull requests live here on
-GitHub.
-
-Contributions are authored with AI assistance under human review, and our commits say so.
+Buy District AI at [distronode.com](https://www.distronode.com), on
+[Microsoft Marketplace](https://marketplace.microsoft.com/en-us/product/saas/distronode.district-ai),
+or through an IT provider in Microsoft's Cloud Solution Provider program.
 
 ## Contact
 
