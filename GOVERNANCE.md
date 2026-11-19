@@ -148,8 +148,9 @@ documentation has the steps. What each one publishes with:
   district-windows, district-core-rust, district-core-swift, district-scheduler, and the files
   and images worldinmotion and mcp-patchbay attach): the workflow's own repository token, and
   keyless Sigstore signing under the workflow's OIDC identity for attestations and signed tags,
-  so no signing key is held by a person. district-core-rust and district-core-swift tag from
-  their release workflow and an owner then creates the GitHub release by hand.
+  so no signing key is held by a person. bridgewatch's release tags are annotated, not
+  signed. district-core-rust and district-core-swift tag from their release workflow and an
+  owner then creates the GitHub release by hand.
 - **App stores and platform code signing** (district-android, district-ios, district-macos,
   the Microsoft Store submission of district-windows, and the macOS build of bridgewatch): the
   signing keys and store credentials are stored for the release workflow, which reads them
