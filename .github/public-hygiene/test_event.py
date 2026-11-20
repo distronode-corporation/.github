@@ -356,6 +356,30 @@ class PullRequestEvents(Runner):
         self.assertEqual(status, 1)
         self.assertIn("Finding in a commit message: private-reference", log)
 
+    def test_a_pull_request_that_moves_while_listed_fails_closed(self) -> None:
+        # The count and head are read again after the listing: a push in between (250 to
+        # 251 commits, or a new head) could otherwise pass on a stale count.
+        commits = self.many_commits(250)
+        for change in ({"pr_commits": 251}, {"head_sha": "d" * 40}):
+            with self.subTest(change=change):
+                api = FakeApi(commits=commits)
+                reads = {"n": 0}
+                original = api.get
+
+                def get(path: str, api: FakeApi = api, change: dict[str, Any] = change) -> Any:
+                    if path == f"/repos/{REPO}/pulls/{api.number}":
+                        reads["n"] += 1
+                        if reads["n"] > 1:
+                            for k, v in change.items():
+                                setattr(api, k, v)
+                    return original(path)
+
+                api.get = get  # type: ignore[method-assign]
+                reads["n"] = 0
+                status, log = self.run_event("pull_request", pr_payload(), api)
+                self.assertEqual(status, 2, log)
+                self.assertIn("changed while its commits were listed", log)
+
     def test_up_to_250_commits_need_no_compare(self) -> None:
         api = FakeApi(commits=self.many_commits(250, bad_at=249))
         status, _ = self.run_event("pull_request", pr_payload(), api)

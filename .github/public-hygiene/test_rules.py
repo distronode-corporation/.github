@@ -520,6 +520,12 @@ class InternalEmailLookAlikes(unittest.TestCase):
             "user:passx@ fails",
             "user:password1@ fails",
             "mail ops@ about the https://user:pass@... form",
+            # A query or a fragment is not user info: the address after it is an address.
+            "https://example?to:pass@" + DOMAIN,
+            "https://example#to:pass@" + DOMAIN,
+            "https://docs.example.org/x?to:pass@" + DOMAIN,
+            "example?to:pass@ fails",
+            "https://{example}:pass@" + DOMAIN,
         ):
             with self.subTest(text=text):
                 self.assertIn("internal-email", rules.rule_ids(text))
@@ -549,6 +555,9 @@ class InternalEmailLookAlikes(unittest.TestCase):
             self.PUBLIC + "+x+y@ was let through",
             self.PUBLIC + "+x@distronode.ca",
             self.PUBLIC + "+x@mail." + DOMAIN,
+            # `%` is source routing (`name%host@relay`), never part of a plus tag here.
+            self.PUBLIC + "+x%y@" + DOMAIN,
+            self.PUBLIC + "+x%y@ was let through",
             "x" + self.PUBLIC + "+x@" + DOMAIN,
         ):
             with self.subTest(text=text):

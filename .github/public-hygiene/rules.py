@@ -690,6 +690,9 @@ PUBLIC_LOCAL_PARTS = frozenset(a.split("@", 1)[0] for a in PUBLIC_ADDRESSES)
 USERINFO_STOPS = " \t\n([<`'\""
 USERINFO_REACH = 140
 SCHEME = _c(r"[a-z][a-z0-9+.\-]{0,30}", IC)
+# A user name as URL user info writes it (RFC 3986 unreserved and sub-delims, `%`): never a
+# path, query or fragment delimiter, so `https://example?to:` is not user info.
+USERINFO_NAME = _c(r"[A-Za-z0-9._~%!$&*+,;=\-]{1,100}")
 # User names that documentation writes in placeholder user info.
 PLACEHOLDER_USER_NAMES = frozenset({"user", "username", "login", "name"})
 
@@ -718,7 +721,7 @@ def _placeholder_userinfo_before(text: str, m: re.Match[str]) -> bool:
     if stop < 0 and low > 0:
         return False  # longer than any user info this exception is for
     scheme, sep, name = text[stop + 1 : colon].rpartition("://")
-    if (sep and not SCHEME.fullmatch(scheme)) or not name or any(ch in name for ch in "/:@"):
+    if (sep and not SCHEME.fullmatch(scheme)) or not USERINFO_NAME.fullmatch(name):
         return False
     if name.lower() not in PLACEHOLDER_USER_NAMES and not _is_placeholder_value(name):
         return False

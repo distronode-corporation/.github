@@ -357,6 +357,11 @@ def pr_commits(api: Api, repo: str, number: int) -> list[dict[str, Any]]:
         commits = compare_commits(api.get_pages(path), path)
     if total > len(commits):
         raise ApiError(f"GET {path}: {total} commits, {len(commits)} listed")
+    # A push while the list was read (250 commits becoming 251, or a new head) would leave
+    # it checked against a stale count, so the count and head are read again.
+    after = api.get(f"/repos/{repo}/pulls/{number}") or {}
+    if int(after.get("commits") or 0) != total or (after.get("head") or {}).get("sha") != (pr.get("head") or {}).get("sha"):
+        raise ApiError(f"GET /repos/{repo}/pulls/{number}: the pull request changed while its commits were listed")
     return commits
 
 
