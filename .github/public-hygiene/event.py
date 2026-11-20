@@ -60,7 +60,9 @@ import rules  # noqa: E402
 MARKER = "<!-- public-hygiene-check -->"
 COMMENT_AUTHOR = "github-actions[bot]"
 MAX_PAGES = 30
-MAX_COMMIT_PAGES = 3  # the API lists at most 250 commits of a pull request
+MAX_PR_COMMITS = 250  # the most the pull request commits API lists
+MAX_COMMIT_PAGES = 3  # 250 commits at 100 a page
+SHA = re.compile(r"[0-9a-f]{40}")
 TIME_BUDGET = 240.0  # seconds; the job's timeout is 5 minutes
 PR_EVENTS = {"pull_request", "pull_request_target", "pull_request_review", "pull_request_review_comment"}
 ISSUE_EVENTS = {"issues", "issue_comment"}
@@ -72,6 +74,7 @@ URL_SHAPE = re.compile(r"https://github\.com/[\w.\-]+/[\w.\-]+/(?:issues|pull|di
 class Api(Protocol):
     def get(self, path: str) -> Any: ...
     def get_all(self, path: str, max_pages: int = MAX_PAGES) -> list[Any]: ...
+    def get_pages(self, path: str, max_pages: int = MAX_PAGES) -> list[Any]: ...
     def post(self, path: str, body: dict[str, Any]) -> Any: ...
     def patch(self, path: str, body: dict[str, Any]) -> Any: ...
     def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]: ...
@@ -159,11 +162,17 @@ class RestApi:
         return self._request("GET", self.base + path)[0]
 
     def get_all(self, path: str, max_pages: int = MAX_PAGES) -> list[Any]:
+        """Every item of a list endpoint, its pages joined."""
+        return [item for page in self.get_pages(path, max_pages) for item in (page or [])]
+
+    def get_pages(self, path: str, max_pages: int = MAX_PAGES) -> list[Any]:
+        """Every page of a paginated endpoint, each as it was answered (the compare API
+        answers an object per page, its commits inside)."""
         url = self.base + path + ("&" if "?" in path else "?") + "per_page=100"
         out: list[Any] = []
         for _ in range(max_pages):
             page, link = self._request("GET", url)
-            out.extend(page or [])
+            out.append(page)
             m = re.search(r'<([^>]+)>;\s*rel="next"', link)
             if not m:
                 return out
@@ -317,14 +326,9 @@ def issue_thread(api: Api, repo: str, number: int, is_pr: bool) -> tuple[list[So
     if is_pr:
         sources += [_source("review", r, (r.get("body"),)) for r in api.get_all(f"/repos/{repo}/pulls/{number}/reviews")]
         sources += [_source("review comment", c, (c.get("body"),)) for c in api.get_all(f"/repos/{repo}/pulls/{number}/comments")]
-        # Commit messages and the addresses they carry. The API lists at most 250, so a
-        # longer pull request cannot be checked in full.
+        # Commit messages and the addresses they carry.
         pr_association = _assoc(issue)
-        commits = api.get_all(f"/repos/{repo}/pulls/{number}/commits", MAX_COMMIT_PAGES)
-        total = int((api.get(f"/repos/{repo}/pulls/{number}") or {}).get("commits") or 0)
-        if total > len(commits):
-            raise ApiError(f"GET /repos/{repo}/pulls/{number}/commits: {total} commits, {len(commits)} listed")
-        for c in commits:
+        for c in pr_commits(api, repo, number):
             commit = c.get("commit") or {}
             texts = (commit.get("message"), (commit.get("author") or {}).get("email"), (commit.get("committer") or {}).get("email"))
             src = _source("commit message", {"user": c.get("author") or {}, "id": c.get("sha")}, texts, url=c.get("html_url"))
@@ -332,6 +336,44 @@ def issue_thread(api: Api, repo: str, number: int, is_pr: bool) -> tuple[list[So
             sources.append(src)
     annotate(api, sources)
     return sources, comments
+
+
+def pr_commits(api: Api, repo: str, number: int) -> list[dict[str, Any]]:
+    """Every commit of a pull request. The pull request commits API lists at most 250; a
+    longer pull request is read from the compare API for its base and head, which pages
+    through all of them (`git log base...head`). Fails closed (ApiError) unless every
+    commit the pull request counts was listed."""
+    pr = api.get(f"/repos/{repo}/pulls/{number}") or {}
+    total = int(pr.get("commits") or 0)
+    path = f"/repos/{repo}/pulls/{number}/commits"
+    if total <= MAX_PR_COMMITS:
+        commits = api.get_all(path, MAX_COMMIT_PAGES)
+    else:
+        base = str((pr.get("base") or {}).get("sha") or "")
+        head = str((pr.get("head") or {}).get("sha") or "")
+        if not (SHA.fullmatch(base) and SHA.fullmatch(head)):
+            raise ApiError(f"GET /repos/{repo}/pulls/{number}: no base or head commit to compare")
+        path = f"/repos/{repo}/compare/{base}...{head}"
+        commits = compare_commits(api.get_pages(path), path)
+    if total > len(commits):
+        raise ApiError(f"GET {path}: {total} commits, {len(commits)} listed")
+    return commits
+
+
+def compare_commits(pages: list[Any], path: str) -> list[dict[str, Any]]:
+    """The commits of a compare, its pages joined: complete only when every page states
+    the same total and that many distinct commits were listed."""
+    commits: list[dict[str, Any]] = []
+    totals: set[Any] = set()
+    for page in pages:
+        if not isinstance(page, dict) or not isinstance(page.get("commits"), list) or not isinstance(page.get("total_commits"), int):
+            raise ApiError(f"GET {path}: not a compare")
+        totals.add(page["total_commits"])
+        commits += page["commits"]
+    shas = {c.get("sha") for c in commits if isinstance(c, dict)}
+    if len(totals) != 1 or len(shas) != len(commits) or totals != {len(commits)}:
+        raise ApiError(f"GET {path}: {sorted(totals)} commits stated, {len(shas)} listed")
+    return commits
 
 
 class AuthorGate:

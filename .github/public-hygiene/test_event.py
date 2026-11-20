@@ -24,6 +24,8 @@ BAD_REF = "GitLab #7, note 1234509876"
 BAD_PATH = "/home/ops/wt/notes.md"
 SECRETS = (BAD_IP, BAD_REF, BAD_PATH, "1234509876", "/home/ops")
 HTML = "https://github.com/octo/app"
+BASE_SHA = "b" * 40
+HEAD_SHA = "c" * 40
 
 
 def user(login: str = "author", kind: str = "User") -> dict[str, Any]:
@@ -49,6 +51,12 @@ class FakeApi:
         self.commits: list[dict[str, Any]] = parts.get("commits", [])
         self.discussion: dict[str, Any] | None = parts.get("discussion")
         self.pr_commits: int | None = parts.get("pr_commits")
+        # The pull request's base and head, and the compare API's pages for that range
+        # (None: every commit on one page, as `commits` holds them).
+        self.base_sha: str = parts.get("base_sha", BASE_SHA)
+        self.head_sha: str = parts.get("head_sha", HEAD_SHA)
+        self.compare_pages: list[dict[str, Any]] | None = parts.get("compare_pages")
+        self.compare_calls: list[str] = []
         self.permissions: dict[str, str] = parts.get("permissions", {})
         self.annotations: list[dict[str, Any]] = parts.get("annotations", [])
         self.fail_reads = parts.get("fail_reads", False)
@@ -69,7 +77,11 @@ class FakeApi:
                 raise event.ApiError("GET x: HTTP 403", 403)
             return {"permission": self.permissions.get(login, "read")}
         if path == f"/repos/{REPO}/pulls/{self.number}":
-            return {"commits": len(self.commits) if self.pr_commits is None else self.pr_commits}
+            return {
+                "commits": len(self.commits) if self.pr_commits is None else self.pr_commits,
+                "base": {"sha": self.base_sha},
+                "head": {"sha": self.head_sha},
+            }
         assert path == f"/repos/{REPO}/issues/{self.number}", path
         return self.issue
 
@@ -79,9 +91,18 @@ class FakeApi:
             f"/repos/{REPO}/issues/{self.number}/comments": self.comments,
             f"/repos/{REPO}/pulls/{self.number}/reviews": self.reviews,
             f"/repos/{REPO}/pulls/{self.number}/comments": self.review_comments,
-            f"/repos/{REPO}/pulls/{self.number}/commits": self.commits,
+            # The API lists at most 250 commits of a pull request.
+            f"/repos/{REPO}/pulls/{self.number}/commits": self.commits[:250],
         }
         return table[path]
+
+    def get_pages(self, path: str, max_pages: int = event.MAX_PAGES) -> list[Any]:
+        self._check_read()
+        assert path == f"/repos/{REPO}/compare/{self.base_sha}...{self.head_sha}", path
+        self.compare_calls.append(path)
+        if self.compare_pages is not None:
+            return self.compare_pages
+        return [{"total_commits": len(self.commits), "commits": self.commits}]
 
     def post(self, path: str, body: dict[str, Any]) -> Any:
         if self.fail_writes:
@@ -300,11 +321,75 @@ class PullRequestEvents(Runner):
         self.assertEqual(status, 1)
 
     def test_more_commits_than_listed_fails_closed(self) -> None:
-        # F6
+        # F6: the compare API lists fewer commits than the pull request has.
         commits = [{"sha": "a1", "html_url": f"{HTML}/commit/a1", "author": user(), "commit": {"message": "clean", "author": {"email": "dev@example.org"}, "committer": {"email": "noreply@github.com"}}}]
         status, log = self.run_event("pull_request", pr_payload(), FakeApi(commits=commits, pr_commits=300))
         self.assertEqual(status, 2)
         self.assertIn("300 commits, 1 listed", log)
+
+    @staticmethod
+    def many_commits(n: int, bad_at: int | None = None) -> list[dict[str, Any]]:
+        out = []
+        for i in range(n):
+            msg = f"fix: per {BAD_REF}" if i == bad_at else f"step {i}"
+            out.append({"sha": f"{i:040x}", "html_url": f"{HTML}/commit/{i:040x}", "author": user(), "commit": {"message": msg, "author": {"email": "dev@example.org"}, "committer": {"email": "noreply@github.com"}}})
+        return out
+
+    def test_a_pull_request_over_250_commits_is_read_in_full(self) -> None:
+        # The pull request commits API stops at 250; the rest come from the compare API
+        # for the same base and head, so a finding in commit 281 is still found.
+        api = FakeApi(commits=self.many_commits(300, bad_at=280))
+        status, log = self.run_event("pull_request", pr_payload(), api)
+        self.assertEqual(status, 1)
+        self.assertIn("Finding in a commit message: private-reference", log)
+        self.assertEqual(len(api.compare_calls), 1)
+        self.assert_no_echo(api, log)
+        clean = FakeApi(commits=self.many_commits(300))
+        status, log = self.run_event("pull_request", pr_payload(), clean)
+        self.assertEqual(status, 0, log)
+        self.assertIn("Checked 302 text(s)", log)
+
+    def test_compare_pages_are_joined(self) -> None:
+        commits = self.many_commits(300, bad_at=299)
+        pages = [{"total_commits": 300, "commits": commits[i : i + 100]} for i in range(0, 300, 100)]
+        status, log = self.run_event("pull_request", pr_payload(), FakeApi(commits=commits, compare_pages=pages))
+        self.assertEqual(status, 1)
+        self.assertIn("Finding in a commit message: private-reference", log)
+
+    def test_up_to_250_commits_need_no_compare(self) -> None:
+        api = FakeApi(commits=self.many_commits(250, bad_at=249))
+        status, _ = self.run_event("pull_request", pr_payload(), api)
+        self.assertEqual(status, 1)
+        self.assertEqual(api.compare_calls, [])
+
+    def test_an_incomplete_compare_fails_closed(self) -> None:
+        commits = self.many_commits(300)
+        cases = {
+            # The compare says it has more than it listed.
+            "short": [{"total_commits": 301, "commits": commits}],
+            # Pages that disagree on the total.
+            "disagree": [{"total_commits": 300, "commits": commits[:150]}, {"total_commits": 299, "commits": commits[150:]}],
+            # A commit listed twice stands in for one never listed.
+            "repeat": [{"total_commits": 300, "commits": commits[:299] + commits[:1]}],
+            # Not a compare page at all.
+            "shape": [{"commits": commits}],
+            "not a list": [{"total_commits": 300, "commits": {"a": 1}}],
+        }
+        for name, pages in cases.items():
+            with self.subTest(case=name):
+                status, log = self.run_event("pull_request", pr_payload(), FakeApi(commits=commits, compare_pages=pages))
+                self.assertEqual(status, 2, log)
+                self.assertIn("could not be read in full", log)
+
+    def test_a_bad_base_or_head_fails_closed(self) -> None:
+        commits = self.many_commits(300)
+        for parts in ({"base_sha": "main"}, {"head_sha": "c" * 39}, {"head_sha": "../x" + "c" * 36}, {"base_sha": ""}):
+            with self.subTest(parts=parts):
+                api = FakeApi(commits=commits, **parts)
+                api.get_pages = mock.Mock(side_effect=AssertionError("no compare for a bad sha"))  # type: ignore[method-assign]
+                status, log = self.run_event("pull_request", pr_payload(), api)
+                self.assertEqual(status, 2, log)
+                self.assertIn("base or head", log)
 
     def test_a_truncated_text_fails_closed(self) -> None:
         # F4

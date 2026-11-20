@@ -490,6 +490,80 @@ class RuleCases(unittest.TestCase):
         self.assertFalse(rules.is_skipped_author(None, None))
 
 
+class InternalEmailLookAlikes(unittest.TestCase):
+    """`internal-email` on what commit messages say about URLs and addresses: placeholder
+    user info, the public address with a plus tag, and example domains are not addresses;
+    a real mailbox or a real credential next to them still is."""
+
+    PUBLIC = "opensource"
+
+    def test_placeholder_user_info_is_not_a_mailbox(self) -> None:
+        for text in (
+            "An apiBase with credentials (https://user:pass@...) was accepted.",
+            "An apiBase with credentials (https://username:password@...) was accepted.",
+            "a URL such as https://user:secret@, refused",
+            "git clone user:pass@ fails",
+            "`https://user:pass@`",
+            "https://user:pass@" + DOMAIN + "/v1 is refused",
+            "https://user:pass@" + DOMAIN + ".example.org/v1 is refused",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(rules.rule_ids(text), [])
+
+    def test_user_info_with_a_real_part_still_fires(self) -> None:
+        for text in (
+            "https://user:ops@... was accepted",  # a mailbox name, not a placeholder
+            "https://jdoe:pass@... was accepted",  # a person's login
+            "https://jdoe:pass@" + DOMAIN,
+            "https://jdoe@" + DOMAIN,
+            "xuser:pass@ fails",
+            "user:passx@ fails",
+            "user:password1@ fails",
+            "mail ops@ about the https://user:pass@... form",
+        ):
+            with self.subTest(text=text):
+                self.assertIn("internal-email", rules.rule_ids(text))
+
+    def test_a_real_password_in_user_info_still_fires(self) -> None:
+        secret = fake("", 12)
+        self.assertIn("token", rules.rule_ids("https://user:" + secret + "@..."))
+        self.assertIn("token", rules.rule_ids("https://user:" + secret.lower() + "@..."))
+        self.assertIn("internal-email", rules.rule_ids("https://user:" + secret.lower() + "@..."))
+
+    def test_the_public_address_with_a_plus_tag_is_public(self) -> None:
+        for text in (
+            "the mailbox with a plus tag (" + self.PUBLIC + "+x@, which still reaches it)",
+            "write to " + self.PUBLIC + "@ about security reports",
+            self.PUBLIC + "+security@" + DOMAIN,
+            "refused another domain (" + self.PUBLIC + "@" + DOMAIN + ".example.org)",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(rules.rule_ids(text), [])
+
+    def test_look_alikes_of_the_public_address_still_fire(self) -> None:
+        for text in (
+            self.PUBLIC + "x@ was let through",
+            self.PUBLIC + "-x@ was let through",
+            self.PUBLIC + ".x@ was let through",
+            "x+" + self.PUBLIC + "@ was let through",
+            self.PUBLIC + "+x+y@ was let through",
+            self.PUBLIC + "+x@distronode.ca",
+            self.PUBLIC + "+x@mail." + DOMAIN,
+            "x" + self.PUBLIC + "+x@" + DOMAIN,
+        ):
+            with self.subTest(text=text):
+                self.assertIn("internal-email", rules.rule_ids(text))
+
+    def test_example_domains_are_not_the_company_domain(self) -> None:
+        for suffix in (".example.org", ".example.com", ".example.net", ".example", ".test", ".invalid", ".localhost"):
+            with self.subTest(suffix=suffix):
+                self.assertEqual(rules.rule_ids("jdoe@" + DOMAIN + suffix), [])
+        self.assertEqual(rules.rule_ids("jdoe@example.org"), [])
+        for text in ("jdoe@example.org." + DOMAIN, "jdoe@" + DOMAIN + ".", "jdoe@mail." + DOMAIN):
+            with self.subTest(text=text):
+                self.assertIn("internal-email", rules.rule_ids(text))
+
+
 TEST_KEY = bytes(range(32))  # a made-up key, for these tests only
 
 
@@ -589,7 +663,7 @@ class Limits(unittest.TestCase):
         units = ("a-", "a.", ".", "eyJa.", "A_", "a@", "a://b@", "1.", "x@y.", "1-", "i-0", "sk-a",
                  "kubectl -n ", "-n kubectl ", "kubectl --context=a ", "a/", "a's ", "a#1 ",
                  "--password ", "password: |\n ", "define('password', ", "ConvertTo-SecureString -Force ",
-                 "password='a ", "password='''")
+                 "password='a ", "password='''", "user:pass@ ", "a:ab@ ", "https://user:pass@ ", "opensource+x@ ")
         shapes = [(unit * (65536 // len(unit) + 1))[:65536] for unit in units]
         # A keyword, then a long run of whitespace: adjacent `\s*` once backtracked.
         shapes += [(kw + ws * 65536)[:65536] for kw in ("gitlab", "project number", "gcloud iam") for ws in (" ", "\n")]
