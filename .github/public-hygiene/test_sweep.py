@@ -425,6 +425,27 @@ class RestApiTests(unittest.TestCase):
         self.assertEqual(seen[0].get_header("Authorization"), "Bearer tok")
         self.assertTrue(seen[0].full_url.endswith("/x?per_page=100"))
 
+    def test_get_pages_keeps_each_page_whole(self) -> None:
+        # The compare API answers an object per page, with its commits inside.
+        api = event.RestApi("https://api.example.org", "tok")
+        pages = [
+            FakeResponse({"total_commits": 3, "commits": [1, 2]}, '<https://api.example.org/repositories/9/compare/a...b?page=2>; rel="next"'),
+            FakeResponse({"total_commits": 3, "commits": [3]}),
+        ]
+        seen: list[Any] = []
+
+        def fake_urlopen(req: Any, timeout: int) -> FakeResponse:
+            seen.append(req)
+            return pages[len(seen) - 1]
+
+        with mock.patch.object(event.OPENER, "open", fake_urlopen):
+            got = api.get_pages("/repos/o/r/compare/a...b")
+        self.assertEqual(got, [{"total_commits": 3, "commits": [1, 2]}, {"total_commits": 3, "commits": [3]}])
+        self.assertTrue(seen[0].full_url.endswith("/compare/a...b?per_page=100"))
+        loop = lambda req, timeout: FakeResponse({}, '<https://api.example.org/x?p=n>; rel="next"')  # noqa: E731
+        with mock.patch.object(event.OPENER, "open", loop), self.assertRaises(event.ApiError):
+            api.get_pages("/x", max_pages=2)
+
     def test_too_many_pages(self) -> None:
         api = event.RestApi("https://api.example.org", "tok")
         loop = lambda req, timeout: FakeResponse([1], '<https://api.example.org/x?p=n>; rel="next"')  # noqa: E731

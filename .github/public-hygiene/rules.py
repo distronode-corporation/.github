@@ -44,7 +44,9 @@ What is out of scope, on purpose:
 
 Documented exceptions (the allowlist), each next to the rule it narrows:
 
-- `internal-email`: the public contact address (PUBLIC_ADDRESSES).
+- `internal-email`: the public contact address (PUBLIC_ADDRESSES), with or without a plus
+  tag or its domain (`opensource+x@`), and the password of placeholder user info
+  (`https://user:pass@...`, PLACEHOLDER_USER_NAMES).
 - `private-gitlab`: the group's public mirrors and profile (PUBLIC_GITLAB_PROJECTS).
 - Every rule but `token`: text inside a public URL (PUBLIC_URL): GitHub, the public
   website, and the App Store, Google Play and Microsoft Store pages, so a store id or a
@@ -678,6 +680,53 @@ EMAIL = _c(
 # a version operator, and not a Kotlin label (`outer@ for`, `break@outer`).
 BARE_MAILBOX = _c(r"(?<![\w.%+\-@/])[a-z][a-z0-9._%+\-]*[a-z0-9]@(?=$|[\s),.;:!?'\"`\]])", re.M)
 KOTLIN_LABEL_AFTER = _c(r"\s*+(?:for|while|do|forEach|run|let|apply|also|with|loop|repeat)\b")
+# The public address with a plus tag (`opensource+x@...`) still reaches the public mailbox.
+# One tag, no second `+`; the domain is checked as for the address itself.
+PLUS_TAG = _c(r"\+[A-Za-z0-9._\-]{1,64}(?=@)")
+PUBLIC_LOCAL_PARTS = frozenset(a.split("@", 1)[0] for a in PUBLIC_ADDRESSES)
+# URL user info just before a match (`https://user:` before `pass@`), with or without a
+# scheme: a match there is the password, not a mailbox. It runs back to a space, a bracket
+# or a quote, at most USERINFO_REACH characters.
+USERINFO_STOPS = " \t\n([<`'\""
+USERINFO_REACH = 140
+SCHEME = _c(r"[a-z][a-z0-9+.\-]{0,30}", IC)
+# A user name as URL user info writes it (RFC 3986 unreserved and sub-delims, `%`): never a
+# path, query or fragment delimiter, so `https://example?to:` is not user info.
+USERINFO_NAME = _c(r"[A-Za-z0-9._~%!$&*+,;=\-]{1,100}")
+# User names that documentation writes in placeholder user info.
+PLACEHOLDER_USER_NAMES = frozenset({"user", "username", "login", "name"})
+
+
+def _is_public_address(address: str) -> bool:
+    """The public address, or the public address with a plus tag."""
+    address = address.lower()
+    return address in PUBLIC_ADDRESSES or PLUS_TAG.sub("", address, count=1) in PUBLIC_ADDRESSES
+
+
+def _is_public_local_part(local: str) -> bool:
+    local = local.lower()
+    return local in PUBLIC_LOCAL_PARTS or PLUS_TAG.sub("", local + "@", count=1)[:-1] in PUBLIC_LOCAL_PARTS
+
+
+def _placeholder_userinfo_before(text: str, m: re.Match[str]) -> bool:
+    """Whether `m` (a local part and its `@`) is the password of placeholder user info:
+    `https://user:pass@...`, `username:password@`. Both halves must be placeholders, so
+    `https://jdoe:pass@` and `user:ops@` still count. A real password is the `token`
+    rule's, and stays a finding here too."""
+    colon = m.start() - 1
+    if colon < 1 or text[colon] != ":":
+        return False
+    low = max(0, colon - USERINFO_REACH)
+    stop = max(text.rfind(ch, low, colon) for ch in USERINFO_STOPS)
+    if stop < 0 and low > 0:
+        return False  # longer than any user info this exception is for
+    scheme, sep, name = text[stop + 1 : colon].rpartition("://")
+    if (sep and not SCHEME.fullmatch(scheme)) or not USERINFO_NAME.fullmatch(name):
+        return False
+    if name.lower() not in PLACEHOLDER_USER_NAMES and not _is_placeholder_value(name):
+        return False
+    secret = m.group(0).split("@", 1)[0]
+    return secret.lower() in PLACEHOLDER_WORDS or _is_placeholder_value(secret)
 
 
 def _find_internal_email(text: str) -> Iterator[tuple[int, int]]:
@@ -685,11 +734,13 @@ def _find_internal_email(text: str) -> Iterator[tuple[int, int]]:
         domain = m.group(1).lower()
         if not any(domain == d or domain.endswith("." + d) for d in COMPANY_DOMAINS):
             continue
-        if m.group(0).lower() in PUBLIC_ADDRESSES:
+        if _is_public_address(m.group(0)) or _placeholder_userinfo_before(text, m):
             continue
         yield m.start(), m.end()
     for m in BARE_MAILBOX.finditer(text):
         if KOTLIN_LABEL_AFTER.match(text, m.end()):
+            continue
+        if _is_public_local_part(m.group(0)[:-1]) or _placeholder_userinfo_before(text, m):
             continue
         yield m.start(), m.end()
 
