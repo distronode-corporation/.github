@@ -18,8 +18,8 @@ Europe, Asia-Pacific), each with its own database, and native apps on every plat
 
 ## Open source
 
-We publish our own work in the open, nearly all of it under Apache-2.0. The apps are open source;
-the District AI service they talk to is not.
+Use the tools we run. We publish our own work in the open, nearly all of it under Apache-2.0.
+The apps are open source; the District AI service they talk to is not.
 
 ### Tools
 
@@ -29,8 +29,9 @@ None of these needs a District AI account.
 |---|---|---|
 | [**worldinmotion**](https://github.com/distronode-corporation/worldinmotion) | End-to-end encrypted, real-time messaging between AI agent sessions across machines and accounts, through a relay that cannot read the messages. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15869/badge)](https://www.bestpractices.dev/projects/15869) [![Release](https://img.shields.io/github/v/release/distronode-corporation/worldinmotion?label=release)](https://github.com/distronode-corporation/worldinmotion/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/worldinmotion)](https://github.com/distronode-corporation/worldinmotion/blob/main/LICENSE) |
 | [**mcp-patchbay**](https://github.com/distronode-corporation/mcp-patchbay) | An MCP server that hosts your other MCP servers and lets the agent switch them on and off mid-session. Confirm servers need a person's yes; deny servers never start. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16485/badge)](https://www.bestpractices.dev/projects/16485) [![Release](https://img.shields.io/github/v/release/distronode-corporation/mcp-patchbay?label=release)](https://github.com/distronode-corporation/mcp-patchbay/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/mcp-patchbay)](https://github.com/distronode-corporation/mcp-patchbay/blob/main/LICENSE) |
-| [**mcp-frontdesk**](https://github.com/distronode-corporation/mcp-frontdesk) | OAuth 2.1 authorization server and token check for MCP servers. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16702/badge)](https://www.bestpractices.dev/projects/16702) [![Release](https://img.shields.io/github/v/release/distronode-corporation/mcp-frontdesk?label=release)](https://github.com/distronode-corporation/mcp-frontdesk/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/mcp-frontdesk)](https://github.com/distronode-corporation/mcp-frontdesk/blob/main/LICENSE) |
+| [**mcp-frontdesk**](https://github.com/distronode-corporation/mcp-frontdesk) | OAuth 2.1 authorization server and token check for MCP servers. It began as the sign-in layer of our own MCP server. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16702/badge)](https://www.bestpractices.dev/projects/16702) [![Release](https://img.shields.io/github/v/release/distronode-corporation/mcp-frontdesk?label=release)](https://github.com/distronode-corporation/mcp-frontdesk/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/mcp-frontdesk)](https://github.com/distronode-corporation/mcp-frontdesk/blob/main/LICENSE) |
 | [**bridgewatch**](https://github.com/distronode-corporation/bridgewatch) | Tray monitor for GitLab CI and GitHub Actions on macOS and Linux: one row per push, every downstream pipeline, and whether it actually deployed. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15887/badge)](https://www.bestpractices.dev/projects/15887) [![Release](https://img.shields.io/github/v/release/distronode-corporation/bridgewatch?label=release)](https://github.com/distronode-corporation/bridgewatch/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/bridgewatch)](https://github.com/distronode-corporation/bridgewatch/blob/main/LICENSE) |
+| [**district-assurance**](https://github.com/distronode-corporation/district-assurance) | An engine for trusted phone calls: verify the caller, file what they confirm, take payment by link, prove every step. Pre-alpha. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16957/badge)](https://www.bestpractices.dev/projects/16957) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-assurance?label=release)](https://github.com/distronode-corporation/district-assurance/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-assurance)](https://github.com/distronode-corporation/district-assurance/blob/main/LICENSE) |
 | [**district-social**](https://github.com/distronode-corporation/district-social) | An open-source engine and CLI that formats, checks and publishes social posts across ten networks. | [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16830/badge)](https://www.bestpractices.dev/projects/16830) [![Release](https://img.shields.io/github/v/release/distronode-corporation/district-social?label=release)](https://github.com/distronode-corporation/district-social/releases/latest) [![License](https://img.shields.io/github/license/distronode-corporation/district-social)](https://github.com/distronode-corporation/district-social/blob/main/LICENSE) |
 
 ### Apps
@@ -54,7 +55,8 @@ None of these needs a District AI account.
 **Infrastructure:** [updates](https://github.com/distronode-corporation/updates) (Sparkle update feeds),
 [homebrew-tap](https://github.com/distronode-corporation/homebrew-tap) (Homebrew tap for our macOS apps, BSD-2-Clause),
 [coderabbit](https://github.com/distronode-corporation/coderabbit) and [cubic-config](https://github.com/distronode-corporation/cubic-config)
-(organization-wide review-bot settings), and two upstream forks,
+(organization-wide review-bot settings), and three upstream forks,
+[awesome-mcp-servers](https://github.com/distronode-corporation/awesome-mcp-servers),
 [plugins-workspace](https://github.com/distronode-corporation/plugins-workspace) and
 [zbus-secret-service-keyring-store](https://github.com/distronode-corporation/zbus-secret-service-keyring-store).
 
